@@ -1,0 +1,6 @@
+{
+  "wipe": {
+    "unknown_kind": "Unknown wipe kind: {kind}",
+    "failed": "Wipe {kind} failed: {error}"
+  }
+}

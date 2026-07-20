@@ -1,0 +1,8 @@
+{
+  "copilot": {
+    "device_code_failed": "GitHub device-code request failed (HTTP {{status}})",
+    "device_code_request_failed": "GitHub device-code request failed: {{error}}",
+    "no_device_code": "GitHub did not return a device code",
+    "provisioning_failed": "Login succeeded but provisioning failed: {{error}}"
+  }
+}

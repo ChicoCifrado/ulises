@@ -1,0 +1,17 @@
+{
+  "admin": {
+    "setup_failed_setup": "Setup failed",
+    "endpoint_refreshed": "Endpoint status refreshed",
+    "no_offline": "No offline endpoints — nothing to clear",
+    "removed_offline": "Removed {{count}} offline endpoint{{s}}",
+    "errors": {
+      "not_authenticated": "Not authenticated",
+      "internal_error": "Internal error",
+      "no_models_found": "No models found or endpoint offline",
+      "admin_only": "Admin only",
+      "workspace_admin_only": "Workspace browsing is admin-only",
+      "workspace_selection_admin": "Workspace selection is admin-only",
+      "feature_not_available": "Feature not available"
+    }
+  }
+}

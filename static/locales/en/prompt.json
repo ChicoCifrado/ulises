@@ -1,0 +1,49 @@
+{
+  "prompt": {
+    "title": "Prompt",
+    "aria_label": "Prompt",
+    "close_aria": "Close prompt",
+    "tabs": {
+      "inject": "Inject",
+      "persona": "Persona",
+      "group": "Group"
+    },
+    "inject": {
+      "prefix": "Prefix",
+      "prefix_placeholder": "Added before your message",
+      "suffix": "Suffix",
+      "suffix_placeholder": "Added after your message",
+      "temperature": "Temperature",
+      "temperature_tip": "Controls randomness. Lower values give focused, deterministic answers (good for code). Higher values give more creative, varied responses.",
+      "precise": "Precise / Code",
+      "balanced": "Balanced",
+      "creative": "Creative",
+      "max_tokens": "Max Tokens",
+      "max_tokens_tip": "Maximum length of the AI response. 'No limit' lets the model decide when to stop.",
+      "no_limit": "No limit"
+    },
+    "persona": {
+      "label": "Persona",
+      "select_placeholder": "Select persona...",
+      "new": "+ New",
+      "name": "Name",
+      "name_placeholder": "Give your persona a name...",
+      "delete_title": "Delete this persona and its memories",
+      "delete": "Delete",
+      "reset_title": "Reset to default",
+      "reset": "↺ Reset",
+      "system_prompt": "System prompt",
+      "prompt_placeholder": "Write rough notes and click Expand, or leave empty",
+      "expand_title": "AI expand — turn your notes into a full system prompt",
+      "expand": "Expand"
+    },
+    "group": {
+      "sequential": "Sequential",
+      "add_participant": "+ Add participant"
+    },
+    "footer": {
+      "cancel": "Cancel",
+      "start": "Start"
+    }
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "codex": {
+    "missing_scope": "Al token de API le falta el ámbito requerido: {{scope}}",
+    "no_owner": "El token de API no tiene propietario",
+    "plugin_not_found": "Paquete de plugin Codex no encontrado"
+  }
+}

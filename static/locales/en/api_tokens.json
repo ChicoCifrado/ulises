@@ -1,0 +1,9 @@
+{
+  "api_tokens": {
+    "unknown_profile": "Unknown token profile",
+    "unknown_scope": "Unknown token scope: {{scope}}",
+    "name_required": "Token name is required",
+    "not_found": "Token not found",
+    "not_yours": "Not your token"
+  }
+}

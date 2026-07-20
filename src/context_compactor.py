@@ -17,7 +17,7 @@ from core.models import ChatMessage
 logger = logging.getLogger(__name__)
 
 
-def _content_as_text(content: Any) -> str:
+def _content_as_text(content: str | list) -> str:
     """Flatten a message's content to plain text.
 
     Handles the three shapes that flow through history: a plain string, a

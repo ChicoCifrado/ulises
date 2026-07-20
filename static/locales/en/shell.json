@@ -1,0 +1,14 @@
+{
+  "shell": {
+    "no_command": "No command provided",
+    "timed_out": "Command timed out after {{timeout}}s",
+    "no_package": "No package specified",
+    "unknown_package": "Unknown package: {{name}}",
+    "no_installable": "No installable packages requested (allowlist: cmake, build-essential, g++, gcc, git, tmux, make)",
+    "install_timed_out": "Install timed out after 180s",
+    "unsupported_engine": "Unsupported engine: {{engine}}",
+    "vllm_not_found": "vLLM CLI not found on PATH.",
+    "diffusers_needs_torch": "Diffusers serving needs both diffusers and torch.",
+    "pty_not_supported": "PTY streaming is not supported on this platform"
+  }
+}

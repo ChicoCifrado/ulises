@@ -1,0 +1,24 @@
+{
+  "skills": {
+    "generic_skill": "La habilidad está marcada como genérica",
+    "audit_flagged": "La auditoría marcó la habilidad como genérica o innecesaria",
+    "no_skills_to_audit": "No hay habilidades para auditar.",
+    "tidy_reason": "Nada que ordenar",
+    "audit_all_log": "Registro de auditoría completa",
+    "audit_nightly_log": "Registro de auditoría nocturna",
+    "could_not_download": "No se pudo descargar",
+    "could_not_parse_skill_md": "No se pudo analizar el Markdown de la skill",
+    "generic_or_unnecessary": "Genérico o innecesario",
+    "import_failed": "Error al importar",
+    "markdown_required": "Se requiere Markdown",
+    "no_builtin_tool": "No hay herramienta integrada",
+    "no_model_configured": "No hay modelo configurado",
+    "not_found": "Skill no encontrada",
+    "query_required": "Se requiere consulta",
+    "slash_unavailable": "Slash command no disponible",
+    "source_unavailable": "Fuente no disponible",
+    "source_unavailable_legacy": "Fuente heredada no disponible",
+    "text_required": "Se requiere texto",
+    "update_failed": "Error al actualizar"
+  }
+}

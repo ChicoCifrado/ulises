@@ -1,0 +1,14 @@
+{
+  "shell": {
+    "no_command": "No se proporcionó ningún comando",
+    "timed_out": "El comando agotó el tiempo de espera después de {{timeout}}s",
+    "no_package": "No se especificó ningún paquete",
+    "unknown_package": "Paquete desconocido: {{name}}",
+    "no_installable": "No se solicitaron paquetes instalables (lista permitida: cmake, build-essential, g++, gcc, git, tmux, make)",
+    "install_timed_out": "La instalación agotó el tiempo de espera después de 180s",
+    "unsupported_engine": "Motor no compatible: {{engine}}",
+    "vllm_not_found": "vLLM CLI no encontrado en PATH.",
+    "diffusers_needs_torch": "Diffusers serving necesita tanto diffusers como torch.",
+    "pty_not_supported": "La transmisión PTY no es compatible en esta plataforma"
+  }
+}

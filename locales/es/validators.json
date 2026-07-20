@@ -1,0 +1,7 @@
+{
+  "validators": {
+    "ssh_port_requires_host": "ssh_port requiere un host",
+    "invalid_remote_host": "remote_host inválido",
+    "invalid_ssh_port": "ssh_port inválido"
+  }
+}

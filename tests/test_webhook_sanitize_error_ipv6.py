@@ -14,8 +14,10 @@ from unittest.mock import patch
 from tests.helpers.import_state import clear_module, preserve_import_state
 
 # Same import dance as test_webhook_ssrf_resilience.py: webhook_manager pulls in
-# core.database (init_db -> create_all), which needs a DB path at import time.
+# core.database, which reads DATABASE_URL at import time (via create_engine).
 # Pin DATABASE_URL to in-memory SQLite and restore module state afterwards.
+# (init_db() is no longer called at module import time — it runs in app.py's
+# startup event — but DATABASE_URL is still read eagerly by engine creation.)
 # sanitize_error itself is pure (stdlib re only).
 with patch.dict(os.environ, {"DATABASE_URL": "sqlite:///:memory:"}), \
         preserve_import_state("src.database", "core.database"):

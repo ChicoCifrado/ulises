@@ -4,6 +4,7 @@
 from fastapi import APIRouter, HTTPException, UploadFile, File
 import logging
 
+from core.translations import t
 from src.upload_limits import read_upload_limited, STT_MAX_AUDIO_BYTES
 
 logger = logging.getLogger(__name__)
@@ -29,18 +30,18 @@ def setup_stt_routes(stt_service):
             if not stt_service.available:
                 raise HTTPException(
                     status_code=503,
-                    detail={"message": "STT service not available or set to browser mode"}
+                    detail={"message": t("stt.unavailable")}
                 )
 
             audio_bytes = await read_upload_limited(file, STT_MAX_AUDIO_BYTES, "Audio file")
             if not audio_bytes:
-                raise HTTPException(status_code=400, detail={"message": "Empty audio file"})
+                raise HTTPException(status_code=400, detail={"message": t("stt.empty_audio")})
 
             text = stt_service.transcribe(audio_bytes)
             if text is None:
                 raise HTTPException(
                     status_code=500,
-                    detail={"message": "Transcription failed"}
+                    detail={"message": t("stt.transcription_failed")}
                 )
 
             return {"text": text}
@@ -51,7 +52,7 @@ def setup_stt_routes(stt_service):
             logger.error(f"Transcription error: {e}", exc_info=True)
             raise HTTPException(
                 status_code=500,
-                detail={"message": f"Transcription failed: {str(e)}"}
+                detail={"message": t("stt.transcription_failed_with_error").format(error=str(e))}
             )
 
     return router

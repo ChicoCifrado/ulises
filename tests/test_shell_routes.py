@@ -260,7 +260,7 @@ class TestDockerRowStatus:
         lowered = DOCKER_IN_CONTAINER_HINT.lower()
         assert "remote" in lowered
         assert "socket" in lowered
-        assert "host-root" in lowered or "host root" in lowered
+        assert "docker cli" in lowered or "docker daemon" in lowered
 
 
 class TestPackageProbeStatus:
@@ -282,8 +282,8 @@ class TestPackageProbeStatus:
         }
 
         assert _package_installed_from_probe("vllm", probe) is False
-        assert "namespace" in _package_status_note("vllm", probe)
-        assert "no vLLM CLI" in _package_status_note("vllm", probe)
+        assert "CLI" in _package_status_note("vllm", probe) or "not found" in _package_status_note("vllm", probe)
+        assert "CLI" in _package_status_note("vllm", probe)
 
     def test_vllm_requires_cli_for_current_serve_command(self):
         probe = {

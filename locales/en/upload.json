@@ -1,0 +1,21 @@
+{
+  "upload": {
+    "access_denied": "Access denied",
+    "not_found": "File not found",
+    "no_files": "No files uploaded",
+    "file_too_large": "File size exceeds {limit} limit",
+    "unsupported_type": "Unsupported file type",
+    "all_failed": "All file uploads failed",
+    "stats_failed": "Failed to get upload statistics",
+    "invalid_id": "Invalid file ID",
+    "not_image": "Not an image",
+    "vision_failed": "Vision analysis failed: {error}",
+    "text_must_be_string": "Text must be a string",
+    "upload_failed": "Upload failed: {error}",
+    "save_failed": "Failed to save file: {error}",
+    "handler_not_configured": "Upload handler not configured",
+    "rate_limited": "Upload rate limit exceeded. Please try again later.",
+    "file_empty": "File is empty",
+    "file_type_not_allowed": "File type not allowed: {content_type}"
+  }
+}

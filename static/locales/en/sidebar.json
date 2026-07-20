@@ -1,0 +1,65 @@
+{
+  "sidebar": {
+    "aria_label": "Sidebar",
+    "toggle": "Toggle sidebar",
+    "show": "Show sidebar",
+    "new_chat": "New chat",
+    "search_title": "Search conversations (Ctrl+K)",
+    "search": "Search",
+    "chats": "Chats",
+    "manage": "manage",
+    "manage_title": "Manage Chats (Library)",
+    "sort_sessions": "Sort sessions",
+    "group": "Group",
+    "sorting": "Sorting...",
+    "bulk_all": "All",
+    "bulk_archive": "Archive selected",
+    "bulk_delete": "Delete selected",
+    "bulk_cancel": "Cancel",
+    "session_actions": {
+      "rename": "Rename",
+      "rename_desc": "Change the session name",
+      "delete": "Delete",
+      "delete_desc": "Remove this session permanently",
+      "memory": "Memory",
+      "memory_desc": "Extract memories from this session"
+    },
+    "email": {
+      "title": "Email",
+      "open_inbox": "Open email inbox",
+      "compose": "Compose email",
+      "new": "new"
+    },
+    "models": {
+      "title": "Models",
+      "sort": "Sort models",
+      "select": "Select model",
+      "add_chat": "+ Chat",
+      "add_chat_aria": "Add model chat"
+    },
+    "tools": {
+      "title": "Tools",
+      "brain": "Brain",
+      "calendar": "Calendar",
+      "compare": "Compare",
+      "cookbook": "Cookbook",
+      "deep_research": "Deep Research",
+      "gallery": "Gallery",
+      "library": "Library",
+      "new_doc": "New document",
+      "document": "document",
+      "notes": "Notes",
+      "tasks": "Tasks",
+      "theme": "Theme"
+    },
+    "user": {
+      "label": "User",
+      "settings": "Settings"
+    },
+    "icon_rail": {
+      "chats_ready": "Chat ready",
+      "documents": "Documents",
+      "settings": "Settings"
+    }
+  }
+}

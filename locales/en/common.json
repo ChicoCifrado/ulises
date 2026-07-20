@@ -1,0 +1,9 @@
+{
+  "common": {
+    "not_found": "Not found",
+    "errors": {
+      "timeout": "Request exceeded {seconds}s timeout",
+      "too_many_requests": "Too many requests"
+    }
+  }
+}

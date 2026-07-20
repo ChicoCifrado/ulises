@@ -1,0 +1,6 @@
+{
+  "search": {
+    "query_required": "Query is required",
+    "unknown_provider": "Unknown provider"
+  }
+}

@@ -2,6 +2,7 @@
 """Routes for cleanup operations."""
 import logging
 from fastapi import APIRouter, HTTPException, Request
+from core.translations import t
 from src.cleanup_service import get_cleanup_preview, cleanup_sessions
 from src.auth_helpers import get_current_user
 
@@ -33,7 +34,7 @@ def setup_cleanup_routes(session_manager):
             return preview
         except Exception as e:
             logger.error(f"Cleanup preview failed: {e}")
-            raise HTTPException(500, "Cleanup preview generation failed")
+            raise HTTPException(500, t("cleanup.preview_failed"))
 
     @router.post("")
     async def cleanup_endpoint(request: Request):
@@ -55,6 +56,6 @@ def setup_cleanup_routes(session_manager):
             }
         except Exception as e:
             logger.error(f"Cleanup failed: {e}")
-            raise HTTPException(500, "Cleanup operation failed")
+            raise HTTPException(500, t("cleanup.operation_failed"))
 
     return router

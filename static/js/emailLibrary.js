@@ -23,8 +23,8 @@ import {
 } from './emailLibrary/signatureFold.js';
 import { state } from './emailLibrary/state.js';
 import { collapseSidebarToRail } from './modalSnap.js';
-
-const API_BASE = window.location.origin;
+import { API_BASE } from './apiBase.js';
+import { t } from './i18n.js';
 let _emailUnreadChipClickWired = false;
 let _libLoadSeq = 0;
 let _libFolderSeq = 0;
@@ -214,13 +214,13 @@ function _wireRecipientChips(root) {
         if (!copied) throw new Error('copy failed');
         copyBtn.classList.add('copied');
         copyBtn.title = 'Copied';
-        showToast?.('Email copied');
+        showToast?.(t('emailLibrary.emailCopied'));
         setTimeout(() => {
           copyBtn.classList.remove('copied');
           copyBtn.title = 'Copy email';
         }, 900);
       } catch (_) {
-        showToast?.('Copy failed');
+        showToast?.(t('emailLibrary.copyFailed'));
       }
       return;
     }
@@ -375,7 +375,7 @@ function _syncEmailReminderBellVisibility(enabled) {
 
 async function _loadEmailReminderBellVisibility() {
   try {
-    const res = await fetch('/api/auth/settings', { credentials: 'same-origin' });
+    const res = await fetch(`${API_BASE}/api/auth/settings`, { credentials: 'same-origin' });
     const settings = await res.json();
     _syncEmailReminderBellVisibility(settings.reminder_channel === 'email');
   } catch (_) {
@@ -579,7 +579,7 @@ async function _deleteEmailAndAdvance(em, card, opts = {}) {
     await fetch(`${API_BASE}/api/email/delete/${em.uid}?folder=${encodeURIComponent(state._libFolder)}${_acct()}`, { method: 'DELETE' });
   } catch (err) {
     console.error('Failed to delete email:', err);
-    showToast('Failed to delete email');
+    showToast(t('emailLibrary.failedToDeleteEmail'));
     return;
   }
   await _animateEmailCardRemoval([em.uid]);
@@ -588,7 +588,7 @@ async function _deleteEmailAndAdvance(em, card, opts = {}) {
   _updateBulkBar();
   _renderGrid();
   _libCacheWriteBack();
-  showToast('Moved to Trash');
+  showToast(t('emailLibrary.movedToTrash'));
   if (!wasExpanded || !nextUid) return;
   const grid = document.getElementById('email-lib-grid');
   const nextCard = grid?.querySelector(`.doclib-card[data-uid="${CSS.escape(String(nextUid))}"]`);
@@ -1097,7 +1097,7 @@ export function openEmailLibrary(opts = {}) {
         credentials: 'same-origin',
       });
       const data = await res.json().catch(() => ({}));
-      showToast(`Deleted ${data.deleted || 0} reminder email${(data.deleted || 0) === 1 ? '' : 's'}`);
+      showToast(t('emailLibrary.deletedReminders', { count: data.deleted || 0 }));
       if ((data.deleted || 0) > 0) {
         const visibleUids = Array.from(document.querySelectorAll('#email-lib-grid .doclib-card[data-uid]'))
           .map(card => card.dataset.uid)
@@ -1112,7 +1112,7 @@ export function openEmailLibrary(opts = {}) {
       _loadEmailsFresh();
     } catch (err) {
       console.error(err);
-      showToast('Failed to clear reminder emails');
+      showToast(t('emailLibrary.failedToClearReminders'));
     }
   });
   document.getElementById('email-undone-btn')?.addEventListener('click', () => {
@@ -1326,7 +1326,7 @@ export function openEmailLibrary(opts = {}) {
   document.getElementById('email-lib-bulk-actions').addEventListener('click', (e) => {
     e.stopPropagation();
     if (state._selectedUids.size === 0) {
-      showToast('Select emails first');
+      showToast(t('emailLibrary.selectEmailsFirst'));
       return;
     }
     _showBulkActionsMenu(e.currentTarget);
@@ -1334,7 +1334,7 @@ export function openEmailLibrary(opts = {}) {
   document.getElementById('email-lib-bulk-delete')?.addEventListener('click', (e) => {
     e.stopPropagation();
     if (state._selectedUids.size === 0) {
-      showToast('Select emails first');
+      showToast(t('emailLibrary.selectEmailsFirst'));
       return;
     }
     _bulkAction('delete');
@@ -4140,7 +4140,7 @@ async function _toggleFromSenderPanel(reader, data, btn) {
 
   const fromAddr = String(data.from_address || '').trim();
   if (!fromAddr) {
-    if (typeof showError === 'function') showError('No sender address available');
+    if (typeof showError === 'function') showError(t('emailLibrary.noSenderAddressAvailable'));
     return;
   }
 
@@ -4565,6 +4565,63 @@ function _wireAttachmentHandlers(reader, folder) {
   // a ReferenceError when this fn is called from contexts that don't have
   // _isMobileUA in scope (e.g. _openEmailAsTab, _openEmailWindow).
   const _isMobileUA = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+  reader.querySelectorAll('.email-attachments-download-all').forEach(btn => {
+    if (btn.dataset.wired === '1') return;
+    btn.dataset.wired = '1';
+    btn.addEventListener('click', async (ev) => {
+      ev.stopPropagation();
+      ev.preventDefault();
+      if (btn.dataset.downloading === '1') return;
+      const uid = btn.dataset.attUid;
+      const sourceFolder = btn.dataset.attFolder || useFolder;
+      const count = Number(btn.dataset.attCount || 0);
+      if (!uid) return;
+      const originalHtml = btn.innerHTML;
+      const originalTitle = btn.title;
+      btn.dataset.downloading = '1';
+      btn.classList.add('is-loading');
+      try {
+        const sp = window.spinnerModule || (await import('./spinner.js')).default;
+        const wp = sp.createWhirlpool(12);
+        wp.element.style.margin = '0';
+        btn.textContent = '';
+        btn.appendChild(wp.element);
+        const label = document.createElement('span');
+        label.textContent = 'All';
+        btn.appendChild(label);
+      } catch (_) {
+        btn.textContent = 'All...';
+      }
+      try {
+        const url = `${API_BASE}/api/email/attachments-download/${encodeURIComponent(uid)}?folder=${encodeURIComponent(sourceFolder)}${_acct()}`;
+        const res = await fetch(url, { credentials: 'same-origin' });
+        if (!res.ok) {
+          const msg = await res.text().catch(() => '');
+          console.error('attachments zip download failed', res.status, msg);
+          location.href = url;
+          return;
+        }
+        const blob = await res.blob();
+        const blobUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = blobUrl;
+        a.download = `email-${uid}-attachments.zip`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+        try { uiModule.showToast && uiModule.showToast(`Downloading ${count || 'all'} attachments`); } catch (_) {}
+      } catch (e) {
+        console.error('attachments zip download error', e);
+        try { const { showError } = await import('./ui.js'); showError('Could not download attachments'); } catch (_) {}
+      } finally {
+        delete btn.dataset.downloading;
+        btn.classList.remove('is-loading');
+        btn.title = originalTitle;
+        btn.innerHTML = originalHtml;
+      }
+    });
+  });
   reader.querySelectorAll('.email-attachment-open').forEach(openBtn => {
     if (openBtn.dataset.wired === '1') return;
     openBtn.dataset.wired = '1';
@@ -4587,7 +4644,7 @@ function _wireAttachmentHandlers(reader, folder) {
         const json = await res.json().catch(() => ({}));
         if (!res.ok || !json.doc_id) {
           const msg = (json && json.error) || `HTTP ${res.status}`;
-          try { const { showError } = await import('./ui.js'); showError(`Couldn't open ${name}: ${msg}`); } catch (_) { alert(`Couldn't open ${name}: ${msg}`); }
+          try { const { showError } = await import('./ui.js'); showError(t('emailLibrary.couldNotOpenWithMsg', { name, msg })); } catch (_) { alert(`Couldn't open ${name}: ${msg}`); }
           return;
         }
         try {
@@ -4612,11 +4669,11 @@ function _wireAttachmentHandlers(reader, folder) {
           }
         } catch (e) {
           console.error('Open document failed:', e);
-          try { const { showError } = await import('./ui.js'); showError('Document opened but panel could not mount'); } catch (_) {}
+          try { const { showError } = await import('./ui.js'); showError(t('emailLibrary.panelCouldNotMount')); } catch (_) {}
         }
       } catch (e) {
         console.error('attachment-as-doc error', e);
-        try { const { showError } = await import('./ui.js'); showError(`Couldn't open ${name}`); } catch (_) {}
+        try { const { showError } = await import('./ui.js'); showError(t('emailLibrary.couldNotOpen', { name })); } catch (_) {}
       } finally {
         openBtn.style.opacity = orig;
       }
@@ -4748,11 +4805,16 @@ function _buildAttsHtmlFor(uid, data) {
     : related.length
       ? `Thread attachments (${related.length})`
       : `Hidden inline attachments (${hidden.length})`;
+  const startCollapsed = !visible.length && !related.length;
+  const downloadAllBtn = visible.length > 4
+    ? `<button type="button" class="email-attachments-download-all" title="Download all attachments" data-att-uid="${_esc(uid)}" data-att-folder="${_esc(data.folder || state._libFolder || 'INBOX')}" data-att-count="${visible.length}"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span>All</span></button>`
+    : '';
   return (
     '<div class="email-reader-atts-wrap collapsed">'
     +   '<div class="email-reader-atts-header email-summary-toggle" role="button" tabindex="0">'
     +     '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 17.93 8.8l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>'
     +     `<span>${label}</span>`
+    +     downloadAllBtn
     +     '<svg class="email-summary-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="margin-left:auto;transition:transform .15s ease;"><polyline points="6 9 12 15 18 9"/></svg>'
     +   '</div>'
     +   visibleSection
@@ -5454,7 +5516,7 @@ async function _generateSummary(reader, data, btn) {
   } catch (e) {
     sp.destroy();
     panel.remove();
-    if (uiModule) uiModule.showError?.('Failed to summarize');
+    if (uiModule) uiModule.showError?.(t('emailLibrary.failedToSummarize'));
   } finally {
     if (btn) btn.disabled = false;
   }
@@ -5642,7 +5704,7 @@ function _showReaderMoreMenu(em, card, reader, anchor) {
       action: async () => {
         const email = (em.from_address || em.from || '').trim();
         if (!email) {
-          import('./ui.js').then(m => m.showError && m.showError('No sender address')).catch(() => {});
+          import('./ui.js').then(m => m.showError && m.showError(t('emailLibrary.noSenderAddress'))).catch(() => {});
           return;
         }
         const name = (em.from_name || '').trim() || email.split('@')[0];
@@ -5655,12 +5717,12 @@ function _showReaderMoreMenu(em, card, reader, anchor) {
           const d = await r.json();
           import('./ui.js').then(m => {
             if (!m.showToast) return;
-            if (d.success && d.message === 'Already exists') m.showToast('Already in contacts');
-            else if (d.success) m.showToast('Saved to contacts');
-            else m.showError && m.showError('Failed to save contact');
+            if (d.success && d.message === 'Already exists') m.showToast(t('emailLibrary.alreadyInContacts'));
+            else if (d.success) m.showToast(t('emailLibrary.savedToContacts'));
+            else m.showError && m.showError(t('emailLibrary.failedToSaveContact'));
           }).catch(() => {});
         } catch (_) {
-          import('./ui.js').then(m => m.showError && m.showError('Failed to save contact')).catch(() => {});
+          import('./ui.js').then(m => m.showError && m.showError(t('emailLibrary.failedToSaveContact'))).catch(() => {});
         }
       },
     },
@@ -6068,6 +6130,15 @@ async function _bulkAction(action) {
   if (cancelBtn) cancelBtn.disabled = true;
   if (selectAll) selectAll.disabled = true;
   if (countEl) countEl.textContent = `${verbing} ${uids.length}…`;
+  const deleteOverlays = action === 'delete'
+    ? uids.map(uid => {
+        const card = document.querySelector(`#email-lib-grid .doclib-card[data-uid="${CSS.escape(String(uid))}"]`);
+        return _showEmailDeleteOverlay(card);
+      }).filter(Boolean)
+    : [];
+  if (deleteOverlays.length) {
+    await Promise.all(deleteOverlays.map(busy => busy.ready).filter(Boolean));
+  }
 
   // Single-uid worker.
   const handleOne = async (uid) => {
@@ -6130,6 +6201,9 @@ async function _bulkAction(action) {
     });
 
     if (action === 'archive' || action === 'delete') {
+      if (action === 'delete') {
+        deleteOverlays.forEach(busy => busy.remove?.());
+      }
       await _animateEmailCardRemoval(uids);
       const removed = new Set(uids.map(uid => String(uid)));
       state._libEmails = state._libEmails.filter(e => !removed.has(String(e.uid)));
@@ -6143,6 +6217,7 @@ async function _bulkAction(action) {
       state._libEmails = state._libEmails.filter(e => !removed.has(String(e.uid)));
     }
   } finally {
+    deleteOverlays.forEach(busy => busy.remove?.());
     if (busySpinner) busySpinner.destroy();
     // Restore whichever button we hijacked (delete vs actions).
     if (targetBtn) {
@@ -6164,7 +6239,7 @@ async function _bulkAction(action) {
   _updateBulkBar();
   _renderGrid();
   if (failedReadSync > 0) {
-    showToast(`Failed to update ${failedReadSync} email${failedReadSync === 1 ? '' : 's'}`);
+    showToast(t('emailLibrary.failedToUpdateEmails', { count: failedReadSync }));
   }
   // Sync successful local mutations into the SWR cache so reopen doesn't
   // briefly show the pre-bulk state.
@@ -6481,16 +6556,16 @@ async function _createEmailReplyReminder(em, dueDate, customText = '') {
     const { showToast } = await import('./ui.js');
     if (dueDate) {
       const fmt = dueDate.toLocaleString([], { month:'short', day:'numeric', hour:'numeric', minute:'2-digit' });
-      showToast(`Todo reminder set for ${fmt}`);
+      showToast(t('emailLibrary.reminderSet', { fmt }));
     } else {
-      showToast('Reply note saved');
+      showToast(t('emailLibrary.replyNoteSaved'));
     }
     if ('Notification' in window && Notification.permission === 'default') {
       try { Notification.requestPermission(); } catch {}
     }
   } catch (e) {
     const { showError } = await import('./ui.js');
-    showError('Failed to create reminder');
+    showError(t('emailLibrary.failedToCreateReminder'));
   }
 }
 

@@ -1,0 +1,8 @@
+{
+  "diagnostics": {
+    "logs_failed": "Failed to retrieve logs: {error}",
+    "db_stats_failed": "Failed to retrieve database statistics",
+    "rag_unavailable": "RAG system not available",
+    "invalid_youtube_url": "Invalid YouTube URL"
+  }
+}

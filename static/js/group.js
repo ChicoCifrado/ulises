@@ -6,9 +6,10 @@ import markdownModule from './markdown.js';
 import chatRenderer from './chatRenderer.js';
 import spinnerModule from './spinner.js';
 import { providerLogo } from './providers.js';
-import { PROMPT_TEMPLATES, getAllPresets } from './presets.js';
+import { PROMPT_TEMPLATES, getUserTemplates } from './presets.js';
 import { sortModelObjects } from './modelSort.js';
 import Storage from './storage.js';
+import { t } from './i18n.js';
 
 let API_BASE = '';
 let _active = false;
@@ -89,12 +90,16 @@ function _initGroupTab() {
 
     const charSel = document.createElement('select');
     charSel.className = 'preset-input';
+    // add an identifier that this is a character selection
+    charSel.dataset.selectionType = "character"
     charSel.style.cssText = 'font-size:11px;flex:1;height:26px;';
     charSel.innerHTML = '<option value="">Empty...</option>' +
       characters.map(c => '<option value="' + c.id + '">' + uiModule.esc(c.name) + '</option>').join('');
 
     const modelSel = document.createElement('select');
     modelSel.className = 'preset-input';
+    // add an identifier that this is a model selection
+    modelSel.dataset.selectionType = "model"
     modelSel.style.cssText = 'font-size:11px;flex:1;height:26px;';
     modelSel.innerHTML = '<option value="">Model…</option>' +
       models.map(m => '<option value="' + m.mid + '">' + uiModule.esc(m.display) + '</option>').join('');
@@ -102,7 +107,7 @@ function _initGroupTab() {
     // Auto-add when model is selected
     modelSel.addEventListener('change', () => {
       if (!modelSel.value) return;
-      if (_groupParticipants.length >= 8) { uiModule.showToast('Max 8'); return; }
+      if (_groupParticipants.length >= 8) { uiModule.showToast(t('group.max8')); return; }
       const entry = { character: null, model: null };
       entry.model = models.find(m => m.mid === modelSel.value) || null;
       if (charSel.value) entry.character = characters.find(c => c.id === charSel.value) || null;
@@ -149,7 +154,7 @@ function _initGroupTab() {
       return m;
     }).filter(Boolean);
 
-    if (picked.length < 2) { uiModule.showToast('Need at least 2 participants — add models or characters'); return; }
+    if (picked.length < 2) { uiModule.showToast(t('group.need_at_least_2')); return; }
 
     const modal = document.getElementById('custom-preset-modal');
     if (modal) modal.classList.add('hidden');
@@ -192,18 +197,70 @@ function _initGroupTab() {
       } catch (e) {}
     }
 
-    uiModule.showToast('Group chat ready — ' + picked.length + ' participants');
+    uiModule.showToast(t('group.ready', { count: picked.length }));
   });
 
   const groupTab = document.querySelector('.preset-tab[data-chartab="group"]');
+  // whenever a user navigates to the Group tab
   if (groupTab) groupTab.addEventListener('click', () => {
     _modelsCache = null;
     if (startBtn) startBtn.textContent = 'Start Group';
     _loadGroupPresets();
-    if (_groupParticipants.length === 0) {
+
+    const isGroupTabUnInitialized =
+      _groupParticipants.length === 0 && participantsEl.children.length === 0;
+
+    if (isGroupTabUnInitialized) {
       setTimeout(() => addBtn.click(), 100);
+    } else {
+      // queue this asynchronously since repopulating the selection drop-downs
+      // do not need to be visible right away; it can be safely delayed before
+      // the next event loop
+      queueMicrotask(() => {
+        repopulateExistingSelections();
+      })
     }
   });
+
+  async function repopulateExistingSelections() {
+    const EMPTY = "";
+
+    const characterSelections = participantsEl.querySelectorAll("select.preset-input[data-selection-type=character]");
+    const modelSelections = participantsEl.querySelectorAll("select.preset-input[data-selection-type=model]");
+
+    if (characterSelections.length !== 0) {
+      const characters = await _getCharacterList();
+
+      characterSelections.forEach((characterSelection) => {
+
+        const chosenCharacter = characterSelection.value;
+        const isChosenCharacterExisting = chosenCharacter !== EMPTY
+          && characters.findIndex((char) => char.id === chosenCharacter) !== -1;
+
+        characterSelection.innerHTML = '<option value="">Empty...</option>' +
+          characters.map(c => '<option value="' + c.id + '">' + uiModule.esc(c.name) + '</option>').join('');
+        if (isChosenCharacterExisting) {
+          characterSelection.value = chosenCharacter;
+        }
+      });
+    }
+
+    if (modelSelections.length !== 0) {
+      const models = await _getModels();
+
+      modelSelections.forEach((modelSelection) => {
+        const chosenModel = modelSelection.value;
+        const isChosenModelExisting = chosenModel !== EMPTY
+          && models.findIndex((model) => model.mid === chosenModel) !== -1;
+
+        modelSelection.innerHTML = '<option value="">Model…</option>' +
+          models.map(m => '<option value="' + m.mid + '">' + uiModule.esc(m.display) + '</option>').join('');
+        if (isChosenModelExisting) {
+          modelSelection.value = chosenModel;
+        }
+      });
+    }
+  }
 
   // Load and render saved group presets
   async function _loadGroupPresets() {
@@ -260,7 +317,7 @@ function _initGroupTab() {
         // Long-press / right-click to delete
         chip.addEventListener('contextmenu', async (e) => {
           e.preventDefault();
-          if (await window.styledConfirm('Delete preset "' + (g.name || 'Group') + '"?', { confirmText: 'Delete', danger: true })) {
+          if (await window.styledConfirm(t('group.delete_preset', { name: g.name || 'Group' }), { confirmText: t('group.delete'), danger: true })) {
             groups.splice(idx, 1);
             fetch(API_BASE + '/api/presets/groups', {
               method: 'POST', credentials: 'same-origin',
@@ -288,17 +345,6 @@ async function _getCharacterList() {
   const chars = PROMPT_TEMPLATES.filter(t => t.isCharacter).map(t => ({
     id: t.id, name: t.name, prompt: t.prompt,
   }));
-  // User-created characters from presets
-  try {
-    const allPresets = getAllPresets();
-    if (allPresets && allPresets.custom && allPresets.custom.character_name) {
-      chars.push({
-        id: 'custom',
-        name: allPresets.custom.character_name,
-        prompt: allPresets.custom.system_prompt || allPresets.custom.prompt || '',
-      });
-    }
-  } catch (e) {}
   // Load user templates and wait for them before returning.
   // The endpoint returns a JSON array directly (not {templates:[...]}).
   // All user templates are personas by definition — no isCharacter filter needed.
@@ -306,12 +352,26 @@ async function _getCharacterList() {
     const r = await fetch(API_BASE + '/api/presets/templates', { credentials: 'same-origin' });
     const data = await r.json();
     const templates = Array.isArray(data) ? data : (data.templates || []);
+
     templates.forEach(t => {
       if (t.id && t.name && !chars.find(c => c.id === t.id)) {
         chars.push({ id: t.id, name: t.name, prompt: t.system_prompt || t.prompt || '' });
       }
     });
   } catch (e) {}
+
+  // Also merge in-memory templates from presets.js — these may include
+  // newly created characters whose async save-to-API hasn't completed yet.
+  const memTemplates = getUserTemplates();
+
+  if (Array.isArray(memTemplates)) {
+    memTemplates.forEach(t => {
+      if (t.id && t.name && !chars.find(c => c.id === t.id)) {
+        chars.push({ id: t.id, name: t.name, prompt: t.system_prompt || t.prompt || '' });
+      }
+    });
+  }
+
   return chars;
 }
 
@@ -440,7 +500,7 @@ export async function showModelPicker() {
         });
         row.querySelector('input').addEventListener('change', (e) => {
           if (e.target.checked) {
-            if (selected.size >= 8) { e.target.checked = false; uiModule.showToast('Max 8 models'); return; }
+            if (selected.size >= 8) { e.target.checked = false; uiModule.showToast(t('group.max8_models')); return; }
             selected.add(m.mid);
           } else {
             selected.delete(m.mid);

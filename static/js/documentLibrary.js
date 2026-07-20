@@ -11,6 +11,7 @@ import markdownModule from './markdown.js';
 import { makeWindowDraggable } from './windowDrag.js';
 import { langIcon } from './langIcons.js';
 import { registerMenuDismiss, dismissOrRemove } from './escMenuStack.js';
+import { t } from './i18n.js';
 
 // ── Injected references from documentModule ──
 let API_BASE = '';
@@ -148,7 +149,7 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
         await navigator.clipboard.writeText(text);
       }
     } catch (err) {
-      if (uiModule && uiModule.showError) uiModule.showError('Failed to copy chat');
+      if (uiModule && uiModule.showError) uiModule.showError(t('documentLibrary.copy_chat_failed'));
     }
   }
 
@@ -719,7 +720,7 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
         a.download = (full.title || 'document') + ext;
         a.click();
         URL.revokeObjectURL(a.href);
-      } catch { if (uiModule) uiModule.showError('Failed to export document'); }
+      } catch { if (uiModule) uiModule.showError(t('documentLibrary.export_failed')); }
     });
     dropdown.appendChild(exportItem);
 
@@ -740,8 +741,8 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
         // Drop it from the current view (it no longer belongs here) and refresh.
         libraryRemoveDocumentFromState(doc.id);
         libraryRenderGrid();
-        if (uiModule) uiModule.showToast(toArchived ? 'Archived' : 'Restored');
-      } catch { if (uiModule) uiModule.showError('Failed to ' + (toArchived ? 'archive' : 'restore')); }
+        if (uiModule) uiModule.showToast(toArchived ? t('common.archived') : t('common.restored'));
+      } catch { if (uiModule) uiModule.showError(toArchived ? t('documentLibrary.archive_failed') : t('documentLibrary.restore_failed')); }
     });
     dropdown.appendChild(archiveItem);
 
@@ -832,8 +833,8 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
         if (!res.ok) throw new Error('failed');
         libraryRemoveDocumentFromState(doc.id);
         libraryRenderGrid();
-        if (uiModule) uiModule.showToast(toArchived ? 'Archived' : 'Restored');
-      } catch { if (uiModule) uiModule.showError('Failed to ' + (toArchived ? 'archive' : 'restore')); }
+        if (uiModule) uiModule.showToast(toArchived ? t('common.archived') : t('common.restored'));
+      } catch { if (uiModule) uiModule.showError(toArchived ? t('documentLibrary.archive_failed') : t('documentLibrary.restore_failed')); }
     });
 
     const leftGroup = document.createElement('div');
@@ -1059,7 +1060,7 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
         }
       }
       if (!sessionId) {
-        if (uiModule) uiModule.showError('Could not create a session');
+        if (uiModule) uiModule.showError(t('documentLibrary.create_session_failed'));
         return;
       }
     }
@@ -1105,10 +1106,10 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
 
       _switchToDoc(created.id);
       _syncDocIndicator();
-      if (uiModule) uiModule.showToast('Document cloned to session');
+      if (uiModule) uiModule.showToast(t('documentLibrary.cloned_to_session'));
     } catch (e) {
       console.error('Failed to import document:', e);
-      if (uiModule) uiModule.showError('Failed to import document');
+      if (uiModule) uiModule.showError(t('documentLibrary.import_failed'));
     }
   }
 
@@ -1198,9 +1199,9 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
         setTimeout(() => { if (card.parentElement) card.remove(); }, 400);
       }
       libraryRemoveDocumentFromState(docId);
-      if (uiModule) uiModule.showToast('Document deleted');
+      if (uiModule) uiModule.showToast(t('common.document_deleted'));
     } catch (e) {
-      if (uiModule) uiModule.showError(`Failed to delete document: ${e.message || e}`);
+      if (uiModule) uiModule.showError(t('documentLibrary.delete_failed', { msg: e.message || e }));
     }
   }
 
@@ -1300,7 +1301,7 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
     if (_librarySelectedIds.size > 5) {
       const ids = [..._librarySelectedIds];
       try {
-        if (uiModule) uiModule.showToast(`Zipping ${ids.length} documents…`);
+        if (uiModule) uiModule.showToast(t('documentLibrary.zipping_documents', { count: ids.length }));
         const res = await fetch(`${API_BASE}/api/documents/export-zip`, {
           method: 'POST', credentials: 'same-origin',
           headers: { 'Content-Type': 'application/json' },
@@ -1316,9 +1317,9 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
         a.click();
         a.remove();
         setTimeout(() => URL.revokeObjectURL(url), 2000);
-        if (uiModule) uiModule.showToast(`Exported ${ids.length} documents (zip)`);
+        if (uiModule) uiModule.showToast(t('documentLibrary.exported_zip', { count: ids.length }));
       } catch (e) {
-        if (uiModule) uiModule.showError('Failed to create zip');
+        if (uiModule) uiModule.showError(t('documentLibrary.create_zip_failed'));
       }
       return;
     }
@@ -1352,7 +1353,7 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
       a.click();
       URL.revokeObjectURL(url);
     }
-    if (uiModule) uiModule.showToast(`Exported ${_librarySelectedIds.size} document${_librarySelectedIds.size !== 1 ? 's' : ''}`);
+    if (uiModule) uiModule.showToast(t('documentLibrary.exported_documents', { count: _librarySelectedIds.size }));
   }
 
   /** Lazy-load SheetJS for spreadsheet parsing */
@@ -2214,7 +2215,7 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
             card.style.transform = '';
           }
         });
-        if (window.uiModule) window.uiModule.showError(`Failed to archive ${failed.length} of ${ids.length} chat${ids.length > 1 ? 's' : ''}`);
+        if (window.uiModule) window.uiModule.showError(t('documentLibrary.archive_chat_failed', { failed: failed.length, total: ids.length }));
       }
       _chatsSelected.clear();
       _chatsSelectMode = false;
@@ -2259,7 +2260,7 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
             card.style.transform = '';
           }
         });
-        if (window.uiModule) window.uiModule.showError(`Failed to delete ${failed.length} of ${ids.length} chat${ids.length > 1 ? 's' : ''}`);
+        if (window.uiModule) window.uiModule.showError(t('documentLibrary.delete_chat_failed', { failed: failed.length, total: ids.length }));
       }
       _chatsSelected.clear();
       _chatsSelectMode = false;
@@ -2289,14 +2290,14 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || 'Tidy failed');
         if (data.status === 'ok') {
-          if (window.uiModule) window.uiModule.showToast('Sorted ' + data.updated + ' sessions into ' + data.folders.length + ' folders');
+          if (window.uiModule) window.uiModule.showToast(t('documentLibrary.sorted_sessions', { updated: data.updated, folders: data.folders.length }));
           if (window.sessionModule) await window.sessionModule.loadSessions();
           _renderLibChats();
         } else {
-          if (window.uiModule) window.uiModule.showToast(data.reason || 'Nothing to tidy');
+          if (window.uiModule) window.uiModule.showToast(data.reason || t('documentLibrary.nothing_to_tidy'));
         }
       } catch (e) {
-        if (window.uiModule) window.uiModule.showError('Tidy: ' + e.message);
+        if (window.uiModule) window.uiModule.showError(t('documentLibrary.tidy_failed', { msg: e.message }));
       } finally {
         tidyBtn.disabled = false;
         tidyBtn.classList.remove('spinning');
@@ -2791,7 +2792,7 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
         } catch (err) {
           discussBtn.disabled = false;
           discussBtn.innerHTML = _orig;
-          if (uiModule) uiModule.showError('Could not start discussion: ' + (err.message || err));
+          if (uiModule) uiModule.showError(t('documentLibrary.start_discussion_failed', { msg: err.message || err }));
         }
       });
       const openBtn = preview.querySelector('.doclib-chat-open-btn');
@@ -2822,7 +2823,7 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
             _renderResearchGrid();
           }
         } catch (err) {
-          if (uiModule && uiModule.showError) uiModule.showError('Failed to delete: ' + err.message);
+          if (uiModule && uiModule.showError) uiModule.showError(t('documentLibrary.delete_failed', { msg: err.message }));
         }
       });
       const arcBtn = preview.querySelector('.doclib-chat-archive-btn');
@@ -2841,7 +2842,7 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
             _renderResearchGrid();
           }
           if (uiModule) uiModule.showToast(toArchived ? 'Archived' : 'Restored');
-        } catch { if (uiModule) uiModule.showError('Failed to ' + (toArchived ? 'archive' : 'restore')); }
+        } catch { if (uiModule) uiModule.showError(toArchived ? t('documentLibrary.archive_failed') : t('documentLibrary.restore_failed')); }
       });
     }
 
@@ -3050,14 +3051,14 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
         }));
         for (const r of results) if (r) candidates.push(r);
         if (candidates.length === 0) {
-          if (uiModule) uiModule.showToast('Nothing to tidy');
+          if (uiModule) uiModule.showToast(t('documentLibrary.nothing_to_tidy'));
           return;
         }
         await Promise.all(candidates.map(r => fetch('/api/research/' + r.id, { method: 'DELETE', credentials: 'same-origin' }).catch(() => {})));
         const ids = new Set(candidates.map(r => r.id));
         _researchItems = _researchItems.filter(r => !ids.has(r.id));
         _renderResearchGrid();
-        if (uiModule) uiModule.showToast('Deleted ' + candidates.length);
+        if (uiModule) uiModule.showToast(t('documentLibrary.deleted_count', { count: candidates.length }));
       } finally {
         sp.stop();
         btn.disabled = false;
@@ -3235,7 +3236,7 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
           setTimeout(() => _openPanel(), 300);
         } catch (e) {
           console.error('Failed to create document:', e);
-          if (uiModule) uiModule.showError('Failed to create document');
+          if (uiModule) uiModule.showError(t('documentLibrary.create_failed'));
         }
       });
     }
@@ -3303,7 +3304,7 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
       } catch (e) {
         spinner.destroy();
         console.error('Document tidy failed:', e);
-        if (uiModule) uiModule.showToast('Tidy failed');
+        if (uiModule) uiModule.showToast(t('documentLibrary.tidy_failed'));
         tidyBtn.disabled = false;
         tidyBtn.classList.remove('spinning');
         tidyBtn.innerHTML = origHTML;
@@ -3343,7 +3344,7 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
     if (bulkActionsBtn) bulkActionsBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       if (_librarySelectedIds.size === 0) {
-        if (uiModule) uiModule.showToast('Select documents first');
+        if (uiModule) uiModule.showToast(t('documentLibrary.select_documents_first'));
         return;
       }
       _showLibDropdown(e.currentTarget, [

@@ -5,6 +5,7 @@
 // ============================================
 
 import uiModule from './ui.js';
+import { t } from './i18n.js';
 import { _diagnose, _showDiagnosis, _clearDiagnosis } from './cookbook-diagnosis.js';
 
 // Shared state/functions injected by init()
@@ -316,7 +317,7 @@ export function _wirePanelEvents(panel, model, backend) {
       const presets = _loadPresets();
       presets.push({ name, model: model.name, backend, fields });
       _savePresets(presets);
-      uiModule.showToast('Preset saved');
+      uiModule.showToast(t('cookbookDownload.presetSaved'));
     });
   }
 
@@ -468,7 +469,7 @@ export async function _runPanelCmd(panel, cmd, opts = {}) {
 export async function _runModelDownload(panel, model, backend, hostOverride) {
   const ggufSource = _ggufDownloadSource(model, backend);
   if (backend === 'llamacpp' && !ggufSource) {
-    uiModule.showToast(_missingGgufMessage(model));
+    uiModule.showToast(t('cookbookDownload.missingGgufSource', { name: model?.name || 'this model' }));
     return;
   }
   const repo = backend === 'ollama'
@@ -548,7 +549,7 @@ export async function _runModelDownload(panel, model, backend, hostOverride) {
   const duplicate = tasks.find(t => sameDownload(t) && (t.status === 'running' || t.status === 'queued'));
   if (duplicate) {
     _renderRunningTab();
-    uiModule.showToast(`${shortName} is already ${duplicate.status === 'queued' ? 'queued' : 'downloading'}`);
+    uiModule.showToast(t('cookbookDownload.alreadyDownloading', { shortName, status: duplicate.status === 'queued' ? 'queued' : 'downloading' }));
     return;
   }
   // Also catch zombie "done" tasks — the cookbook may have lost track of a
@@ -583,7 +584,7 @@ export async function _runModelDownload(panel, model, backend, hostOverride) {
           _saveTasks(_fresh);
         }
         _renderRunningTab();
-        uiModule.showToast(`${shortName} is still downloading (was marked finished after a restart — revived)`);
+        uiModule.showToast(t('cookbookDownload.revivedDownload', { shortName }));
         return;
       }
     } catch { /* probe failed — fall through and let the user launch */ }
@@ -596,7 +597,7 @@ export async function _runModelDownload(panel, model, backend, hostOverride) {
     allTasks.push({ id: queueId, sessionId: queueId, name: taskName, type: 'download', status: 'queued', output: '', ts: Date.now(), payload, remoteHost: host });
     _saveTasks(allTasks);
     _renderRunningTab();
-    uiModule.showToast(`Queued ${shortName} — waiting for current download`);
+    uiModule.showToast(t('cookbookDownload.queuedDownload', { shortName }));
     return;
   }
 
@@ -610,18 +611,18 @@ export async function _runModelDownload(panel, model, backend, hostOverride) {
     if (!res.ok) {
       // Errors carry actionable text (e.g. "tmux is required …"); keep them up
       // long enough to read, matching the serve path's duration (issue #1355).
-      uiModule.showToast('Download failed: HTTP ' + res.status, 9000);
+      uiModule.showToast(t('cookbookDownload.downloadFailedHttp', { status: res.status }), 9000);
       return;
     }
     const data = await res.json();
     if (!data.ok) {
-      uiModule.showToast('Download failed: ' + (data.error || ''), 9000);
+      uiModule.showToast(t('cookbookDownload.downloadFailed', { error: data.error || '' }), 9000);
       return;
     }
     _addTask(data.session_id, taskName, 'download', payload);
-    uiModule.showToast(`Downloading ${taskName}...`);
+    uiModule.showToast(t('cookbookDownload.downloading', { taskName }));
   } catch (e) {
-    uiModule.showToast('Download failed: ' + e.message, 9000);
+    uiModule.showToast(t('cookbookDownload.downloadFailed', { error: e.message }), 9000);
   }
 }
 

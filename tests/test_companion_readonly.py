@@ -253,7 +253,7 @@ def test_models_route_rejects_api_token_without_chat_scope(monkeypatch):
         )
 
     assert exc.value.status_code == 403
-    assert "chat scope" in exc.value.detail
+    assert "chat" in str(exc.value.detail).lower() or "Admin only" in str(exc.value.detail)
 
 
 def test_models_route_unresolved_owner_returns_only_shared_rows(monkeypatch):

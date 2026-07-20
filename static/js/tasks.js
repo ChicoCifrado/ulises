@@ -8,8 +8,8 @@ import * as spinnerModule from './spinner.js';
 import { makeWindowDraggable } from './windowDrag.js';
 import { sortModelIds } from './modelSort.js';
 import { ordinalSuffix } from './util/ordinal.js';
-
-const API_BASE = window.location.origin;
+import { API_BASE } from './apiBase.js';
+import { t } from './i18n.js';
 let _open = false;
 let _tasksCascadeNext = false;   // play the domino-in entrance on the next render
 let _tasks = [];
@@ -66,7 +66,7 @@ async function _createTask(data) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   });
-  if (!res.ok) throw new Error('Failed to create task');
+  if (!res.ok) throw new Error(t('tasks.create_failed'));
   return await res.json();
 }
 
@@ -77,7 +77,7 @@ async function _updateTask(id, data) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   });
-  if (!res.ok) throw new Error('Failed to update task');
+  if (!res.ok) throw new Error(t('tasks.update_failed'));
   return await res.json();
 }
 
@@ -85,7 +85,7 @@ async function _deleteTask(id) {
   const res = await fetch(`${API_BASE}/api/tasks/${id}`, {
     method: 'DELETE', credentials: 'same-origin',
   });
-  if (!res.ok) throw new Error('Failed to delete task');
+  if (!res.ok) throw new Error(t('tasks.delete_failed'));
 }
 
 function _taskCardById(id) {
@@ -107,14 +107,14 @@ async function _pauseTask(id) {
   const res = await fetch(`${API_BASE}/api/tasks/${id}/pause`, {
     method: 'POST', credentials: 'same-origin',
   });
-  if (!res.ok) throw new Error('Failed to pause task');
+  if (!res.ok) throw new Error(t('tasks.pause_failed'));
 }
 
 async function _resumeTask(id) {
   const res = await fetch(`${API_BASE}/api/tasks/${id}/resume`, {
     method: 'POST', credentials: 'same-origin',
   });
-  if (!res.ok) throw new Error('Failed to resume task');
+  if (!res.ok) throw new Error(t('tasks.resume_failed'));
 }
 
 async function _runNow(id, force = false) {
@@ -125,12 +125,12 @@ async function _runNow(id, force = false) {
     // Surface the backend's actual reason — 409 means "already running",
     // 404 task missing, etc. Previously every error rendered as the same
     // generic "Failed to trigger task", which hid the cause.
-    let msg = `Failed to trigger task (${res.status})`;
+    let msg = t('tasks.trigger_failed_status', { status: res.status });
     try {
       const data = await res.json();
       if (data && data.detail) msg = data.detail;
     } catch (_) {}
-    if (res.status === 409) msg = 'Task is already running';
+    if (res.status === 409) msg = t('tasks.already_running');
     throw new Error(msg);
   }
 }
@@ -141,7 +141,7 @@ async function _stopTask(id) {
     credentials: 'same-origin',
   });
   if (!res.ok) {
-    let msg = `Failed to stop task (${res.status})`;
+    let msg = t('tasks.stop_failed_status', { status: res.status });
     try {
       const data = await res.json();
       if (data && data.detail) msg = data.detail;
@@ -211,6 +211,95 @@ async function _saveUrgentEmailSettings(prompt) {
     }),
   });
 }
+
+const _EMAIL_ACCOUNT_ACTIONS = new Set([
+  'summarize_emails',
+  'draft_email_replies',
+  'email_auto_translate',
+  'extract_email_events',
+  'check_email_urgency',
+]);
+
+let _emailAccounts = null;
+async function _fetchEmailAccountsForTasks() {
+  if (_emailAccounts) return _emailAccounts;
+  try {
+    const res = await fetch(`${API_BASE}/api/email/accounts`, { credentials: 'same-origin' });
+    const data = await res.json();
+    _emailAccounts = Array.isArray(data.accounts) ? data.accounts : [];
+  } catch (e) {
+    _emailAccounts = [];
+  }
+  return _emailAccounts;
+}
+
+function _taskPromptConfig(prompt) {
+  const raw = (prompt || '').trim();
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch (_) {
+    const cfg = {};
+    for (const line of raw.split(/\r?\n/)) {
+      const idx = line.indexOf('=');
+      if (idx <= 0) continue;
+      const key = line.slice(0, idx).trim();
+      const val = line.slice(idx + 1).trim();
+      if (key) cfg[key] = val;
+    }
+    return cfg;
+  }
+}
+
+function _parseTaskEmailOutputTarget(output) {
+  const raw = String(output || '').trim();
+  if (!raw) return { enabled: false, to: '', accountId: '' };
+  if (raw === 'email') return { enabled: true, to: '', accountId: '' };
+  if (/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(raw)) return { enabled: true, to: raw, accountId: '' };
+  if (!raw.startsWith('email:')) return { enabled: false, to: '', accountId: '' };
+  let payload = raw.slice('email:'.length).trim();
+  let accountId = '';
+  const marker = '|account=';
+  const markerIdx = payload.indexOf(marker);
+  if (markerIdx >= 0) {
+    accountId = payload.slice(markerIdx + marker.length).trim();
+    payload = payload.slice(0, markerIdx).trim();
+  }
+  return {
+    enabled: true,
+    to: payload && payload !== 'self' ? payload : '',
+    accountId,
+  };
+}
+
+function _buildTaskEmailOutputTarget(to, accountId) {
+  const cleanTo = String(to || '').trim();
+  const cleanAccount = String(accountId || '').trim();
+  const base = `email:${cleanTo || 'self'}`;
+  return cleanAccount ? `${base}|account=${cleanAccount}` : (cleanTo ? base : 'email');
+}
+
+async function _renderEmailActionOptions(action, existing, extra) {
+  if (!_EMAIL_ACCOUNT_ACTIONS.has(action)) return;
+  const accounts = (await _fetchEmailAccountsForTasks()).filter(a => a && a.enabled !== false);
+  const cfg = _taskPromptConfig(existing?.prompt || '');
+  const current = String(cfg.account_id || cfg.email_account_id || '');
+  const options = [
+    `<option value="" ${current ? '' : 'selected'}>All accounts</option>`,
+    ...accounts.map(a => {
+      const id = String(a.id || '');
+      const label = a.name || a.from_address || a.imap_user || id.slice(0, 8);
+      const suffix = a.is_default ? ' (default)' : '';
+      return `<option value="${_escHtml(id)}" ${id === current ? 'selected' : ''}>${_escHtml(label + suffix)}</option>`;
+    }),
+  ].join('');
+  extra.insertAdjacentHTML('afterbegin', `
+    <label class="task-form-label">Email account</label>
+    <select id="task-form-email-account" class="task-form-input">${options}</select>
+  `);
+}
+
 
 let _triggerEvents = null;
 async function _fetchEvents() {
@@ -332,6 +421,7 @@ const _TASK_ICONS = {
   // Email
   summarize_emails:    '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>',
   draft_email_replies: '<polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/>',
+  email_auto_translate:'<path d="M5 8h9"/><path d="M9 4v4"/><path d="M4 13c2.2-.2 4.2-1.1 5.5-2.8"/><path d="M10.5 13c-1.1-.6-2-1.5-2.7-2.8"/><path d="M14 20l4-9 4 9"/><path d="M15.4 17h5.2"/>',
   extract_email_events:'<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/><path d="M7 14h5"/><path d="M7 18h8"/>',
   classify_events:    '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/><path d="M8 15h.01M12 15h.01M16 15h.01"/>',
   learn_sender_signatures:'<path d="M20 6 9 17l-5-5"/><path d="M14 6h6v6"/>',
@@ -359,6 +449,7 @@ function _taskIcon(task) {
 const _MODEL_BACKED_ACTIONS = new Set([
   'summarize_emails',
   'draft_email_replies',
+  'email_auto_translate',
   'extract_email_events',
   'classify_events',
   'learn_sender_signatures',
@@ -503,6 +594,7 @@ const _CATEGORY_MAP = {
   extract_email_events: 'Calendar',
   summarize_emails:           'Email',
   draft_email_replies:        'Email',
+  email_auto_translate:       'Email',
   learn_sender_signatures:    'Email',
   check_email_urgency:        'Email',
   daily_brief:                'Assistant',
@@ -578,13 +670,13 @@ async function _taskBulkDelete() {
   const ids = [..._taskSelected];
   if (!ids.length) return;
   const ok = uiModule?.styledConfirm
-    ? await uiModule.styledConfirm(`Delete ${ids.length} task${ids.length > 1 ? 's' : ''}? This cannot be undone.`, { confirmText: 'Delete', danger: true })
-    : confirm(`Delete ${ids.length} task(s)?`);
+    ? await uiModule.styledConfirm(t('tasks.bulk_delete_confirm', { count: ids.length }), { confirmText: t('common.delete'), danger: true })
+    : confirm(t('tasks.bulk_delete_confirm_short', { count: ids.length }));
   if (!ok) return;
   const results = await Promise.allSettled(ids.map(id => _deleteTask(id)));
   const deletedIds = ids.filter((_, i) => results[i].status === 'fulfilled');
   await _animateTaskRemoval(deletedIds);
-  if (uiModule) uiModule.showToast(`Deleted ${deletedIds.length} task${deletedIds.length > 1 ? 's' : ''}`);
+  if (uiModule) uiModule.showToast(t('tasks.bulk_deleted', { count: deletedIds.length }));
   await _fetchTasks();
   _taskExitSelect();  // clears selection + re-renders the fresh list
 }
@@ -619,6 +711,7 @@ function _renderTaskChips() {
 const _TASK_CACHE_LABELS = {
   summarize_emails: 'email summaries',
   draft_email_replies: 'AI reply drafts',
+  email_auto_translate: 'email translations',
   extract_email_events: 'email calendar cache',
   learn_sender_signatures: 'sender signatures',
   check_email_urgency: 'email tags',
@@ -1050,6 +1143,7 @@ function _showForm(existing, initTaskType, initTriggerType) {
       <select id="task-form-output" class="task-form-input">
         <option value="session">Session</option>
       </select>
+      <div id="task-form-output-extra"></div>
 
       <label class="task-form-label">Model <span style="opacity:0.5;font-weight:normal;font-size:10px;">(optional — overrides session default)</span></label>
       <select id="task-form-model" class="task-form-input">
@@ -1294,7 +1388,7 @@ function _showForm(existing, initTaskType, initTriggerType) {
         `;
         document.getElementById('task-form-webhook-copy')?.addEventListener('click', () => {
           navigator.clipboard.writeText(url);
-          if (uiModule) uiModule.showToast('Copied');
+          if (uiModule) uiModule.showToast(t('tasks.copied'));
         });
       } else {
         triggerOpts.innerHTML = '<div style="font-size:11px;opacity:0.5;margin-top:4px;">Webhook URL will be generated when the task is saved.</div>';
@@ -1312,28 +1406,70 @@ function _showForm(existing, initTaskType, initTriggerType) {
   renderTriggerOpts();
 
   // Populate output targets
+  const renderOutputExtra = async () => {
+    const outputSel = document.getElementById('task-form-output');
+    const extra = document.getElementById('task-form-output-extra');
+    if (!outputSel || !extra) return;
+    const currentTo = document.getElementById('task-form-output-email-to')?.value;
+    const currentAccountId = document.getElementById('task-form-output-email-account')?.value;
+    extra.innerHTML = '';
+    if (outputSel.value !== 'email') return;
+    const parsed = _parseTaskEmailOutputTarget(existing?.output_target || '');
+    if (currentTo != null) parsed.to = currentTo;
+    if (currentAccountId != null) parsed.accountId = currentAccountId;
+    const accounts = (await _fetchEmailAccountsForTasks()).filter(a => a && a.enabled !== false);
+    const options = [
+      `<option value="" ${parsed.accountId ? '' : 'selected'}>Default sending account</option>`,
+      ...accounts.map(a => {
+        const id = String(a.id || '');
+        const label = a.name || a.from_address || a.imap_user || id.slice(0, 8);
+        const suffix = a.is_default ? ' (default)' : '';
+        return `<option value="${_escHtml(id)}" ${id === parsed.accountId ? 'selected' : ''}>${_escHtml(label + suffix)}</option>`;
+      }),
+    ].join('');
+    extra.innerHTML = `
+      <div class="task-form-output-email" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-top:6px;">
+        <label>
+          <span class="task-form-label" style="margin-top:0;">From</span>
+          <select id="task-form-output-email-account" class="task-form-input">${options}</select>
+        </label>
+        <label>
+          <span class="task-form-label" style="margin-top:0;">To</span>
+          <input id="task-form-output-email-to" class="task-form-input" type="email" value="${_escHtml(parsed.to)}" placeholder="Me / selected account" />
+        </label>
+      </div>
+      <div class="memory-desc" style="font-size:10px;margin-top:3px;">Leave To blank to send to the selected account’s own address.</div>
+    `;
+  };
+
   _fetchOutputTargets().then(targets => {
     const outputSel = document.getElementById('task-form-output');
     if (!outputSel || targets.length <= 1) return;
     outputSel.innerHTML = '';
+    const existingEmailOutput = _parseTaskEmailOutputTarget(existing?.output_target || '');
     let matchedOutput = false;
     for (const t of targets) {
       const opt = document.createElement('option');
       opt.value = t.value;
       opt.textContent = t.label;
-      if (existing?.output_target === t.value) {
+      if (existingEmailOutput.enabled && t.value === 'email') {
+        opt.selected = true;
+        matchedOutput = true;
+      } else if (!existingEmailOutput.enabled && existing?.output_target === t.value) {
         opt.selected = true;
         matchedOutput = true;
       }
       outputSel.appendChild(opt);
     }
-    if (existing?.output_target && !matchedOutput) {
+    if (existing?.output_target && !matchedOutput && !existingEmailOutput.enabled) {
       const opt = document.createElement('option');
       opt.value = existing.output_target;
       opt.textContent = existing.output_target.includes('@') ? `Email: ${existing.output_target}` : existing.output_target;
       opt.selected = true;
       outputSel.appendChild(opt);
     }
+    outputSel.addEventListener('change', renderOutputExtra);
+    renderOutputExtra();
   });
 
   // Populate model dropdown from /api/models. Value is "endpoint_url::model"
@@ -1418,7 +1554,13 @@ function _showForm(existing, initTaskType, initTriggerType) {
   // Save
   document.getElementById('task-form-save').addEventListener('click', async () => {
     const nameEl = document.getElementById('task-form-name');
-    const outputTarget = document.getElementById('task-form-output')?.value || 'session';
+    const outputSelValue = document.getElementById('task-form-output')?.value || 'session';
+    let outputTarget = outputSelValue;
+    if (outputSelValue === 'email') {
+      const to = document.getElementById('task-form-output-email-to')?.value || '';
+      const accountId = document.getElementById('task-form-output-email-account')?.value || '';
+      outputTarget = _buildTaskEmailOutputTarget(to, accountId);
+    }
 
     const payload = {
       task_type: taskType,
@@ -1454,7 +1596,7 @@ function _showForm(existing, initTaskType, initTriggerType) {
     if (taskType === 'llm' || taskType === 'research') {
       const prompt = document.getElementById('task-form-prompt')?.value?.trim();
       if (!prompt) {
-        if (uiModule) uiModule.showError('Prompt is required');
+        if (uiModule) uiModule.showError(t('tasks.prompt_required'));
         return;
       }
       payload.prompt = prompt;
@@ -1465,7 +1607,7 @@ function _showForm(existing, initTaskType, initTriggerType) {
       payload.character_id = '';
       const action = document.getElementById('task-form-action')?.value;
       if (!action) {
-        if (uiModule) uiModule.showError('Select an action');
+        if (uiModule) uiModule.showError(t('tasks.select_action'));
         return;
       }
       payload.action = action;
@@ -1474,7 +1616,7 @@ function _showForm(existing, initTaskType, initTriggerType) {
         try {
           await _saveUrgentEmailSettings(urgentPrompt);
         } catch (e) {
-          if (uiModule) uiModule.showError('Failed to save urgency rules');
+          if (uiModule) uiModule.showError(t('tasks.save_urgency_failed'));
           return;
         }
       }
@@ -1488,7 +1630,7 @@ function _showForm(existing, initTaskType, initTriggerType) {
       if (payload.schedule === 'cron') {
         const cronVal = document.getElementById('task-form-cron')?.value?.trim();
         if (!cronVal) {
-          if (uiModule) uiModule.showError('Cron expression is required');
+          if (uiModule) uiModule.showError(t('tasks.cron_required'));
           return;
         }
         payload.cron_expression = cronVal;
@@ -1510,7 +1652,7 @@ function _showForm(existing, initTaskType, initTriggerType) {
       const evSel = document.getElementById('task-form-event');
       const countInput = document.getElementById('task-form-trigger-count');
       if (!evSel?.value) {
-        if (uiModule) uiModule.showError('Select an event');
+        if (uiModule) uiModule.showError(t('tasks.select_event'));
         return;
       }
       payload.trigger_event = evSel.value;
@@ -1523,10 +1665,10 @@ function _showForm(existing, initTaskType, initTriggerType) {
       // object passed for AI pre-fill has no id → create via POST.
       if (existing && existing.id) {
         await _updateTask(existing.id, payload);
-        if (uiModule) uiModule.showToast('Task updated');
+        if (uiModule) uiModule.showToast(t('tasks.updated'));
       } else {
         await _createTask(payload);
-        if (uiModule) uiModule.showToast('Task created');
+        if (uiModule) uiModule.showToast(t('tasks.created'));
       }
       await _fetchTasks();
       _switchTab('tasks');
@@ -1600,7 +1742,7 @@ async function _showRunHistory(taskId, taskName) {
 async function _doPause(id) {
   try {
     await _pauseTask(id);
-    if (uiModule) uiModule.showToast('Task paused');
+    if (uiModule) uiModule.showToast(t('tasks.paused'));
     await _fetchTasks();
     _renderMainView();
   } catch (e) { if (uiModule) uiModule.showError(e.message); }
@@ -1609,7 +1751,7 @@ async function _doPause(id) {
 async function _doResume(id) {
   try {
     await _resumeTask(id);
-    if (uiModule) uiModule.showToast('Task resumed');
+    if (uiModule) uiModule.showToast(t('tasks.resumed'));
     await _fetchTasks();
     _renderMainView();
   } catch (e) { if (uiModule) uiModule.showError(e.message); }
@@ -1618,16 +1760,16 @@ async function _doResume(id) {
 async function _doRunNow(id, force = false) {
   try {
     await _runNow(id, force);
-    if (uiModule) uiModule.showToast(force ? 'Task triggered in parallel' : 'Task triggered');
+    if (uiModule) uiModule.showToast(force ? t('tasks.triggered_parallel') : t('tasks.triggered'));
   } catch (e) {
     // Mirror the polling notification surface so the user sees the same kind
     // of feedback they get for finished/failed tasks — a real browser
     // Notification when permission is granted, toast fallback otherwise.
-    const msg = e.message || 'Failed to trigger task';
+    const msg = e.message || t('tasks.trigger_failed');
     let fired = false;
     try {
       if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-        new Notification('Task', { body: msg, tag: 'task-runnow-' + id, icon: '/static/favicon.ico' });
+        new Notification(t('tasks.notification_default_title'), { body: msg, tag: 'task-runnow-' + id, icon: '/static/favicon.ico' });
         fired = true;
       }
     } catch (_) {}
@@ -1637,13 +1779,13 @@ async function _doRunNow(id, force = false) {
 
 async function _doDelete(id) {
   const ok = uiModule?.styledConfirm
-    ? await uiModule.styledConfirm('Delete this task and all its run history?', { confirmText: 'Delete', danger: true })
-    : confirm('Delete this task and all its run history?');
+    ? await uiModule.styledConfirm(t('tasks.delete_confirm'), { confirmText: t('common.delete'), danger: true })
+    : confirm(t('tasks.delete_confirm'));
   if (!ok) return;
   try {
     await _deleteTask(id);
     await _animateTaskRemoval([id]);
-    if (uiModule) uiModule.showToast('Task deleted');
+    if (uiModule) uiModule.showToast(t('tasks.deleted'));
     await _fetchTasks();
     _renderMainView();
   } catch (e) { if (uiModule) uiModule.showError(e.message); }
@@ -1651,13 +1793,13 @@ async function _doDelete(id) {
 
 async function _doRevert(id) {
   const ok = uiModule?.styledConfirm
-    ? await uiModule.styledConfirm('Revert this built-in task to its default schedule and settings?', { confirmText: 'Revert' })
-    : confirm('Revert this built-in task to its default?');
+    ? await uiModule.styledConfirm(t('tasks.revert_confirm'), { confirmText: t('common.revert') })
+    : confirm(t('tasks.revert_confirm_short'));
   if (!ok) return;
   try {
     const res = await fetch(`${API_BASE}/api/tasks/${id}/revert`, { method: 'POST', credentials: 'same-origin' });
-    if (!res.ok) throw new Error('Failed to revert task');
-    if (uiModule) uiModule.showToast('Reverted to default');
+    if (!res.ok) throw new Error(t('tasks.revert_failed'));
+    if (uiModule) uiModule.showToast(t('tasks.reverted'));
     await _fetchTasks();
     _renderMainView();
   } catch (e) { if (uiModule) uiModule.showError(e.message); }
@@ -1665,8 +1807,8 @@ async function _doRevert(id) {
 
 async function _doClearTaskCache(id, label = 'cache') {
   const ok = uiModule?.styledConfirm
-    ? await uiModule.styledConfirm(`Clear cached ${label} for this task?`, { confirmText: 'Clear' })
-    : confirm(`Clear cached ${label} for this task?`);
+    ? await uiModule.styledConfirm(t('tasks.clear_cache_confirm', { label }), { confirmText: t('common.clear') })
+    : confirm(t('tasks.clear_cache_confirm', { label }));
   if (!ok) return;
   try {
     const res = await fetch(`${API_BASE}/api/tasks/${encodeURIComponent(id)}/clear-cache`, {
@@ -1676,9 +1818,9 @@ async function _doClearTaskCache(id, label = 'cache') {
     const data = await res.json().catch(() => ({}));
     if (!res.ok || !data.ok) throw new Error(data.detail || data.error || `HTTP ${res.status}`);
     const n = Object.values(data.cleared || {}).reduce((a, b) => a + Number(b || 0), 0) + Number(data.files || 0);
-    if (uiModule) uiModule.showToast(`Cleared ${label}${n ? ` (${n})` : ''}`);
+    if (uiModule) uiModule.showToast(t('tasks.cache_cleared', { label, count: n }));
   } catch (e) {
-    if (uiModule) uiModule.showError(`Clear cache failed: ${e.message || e}`);
+    if (uiModule) uiModule.showError(t('tasks.clear_cache_failed', { error: e.message || e }));
   }
 }
 
@@ -1687,18 +1829,18 @@ async function _doToggleAll() {
   const hasActive = _tasks.some(t => t.status === 'active');
   const targets = _tasks.filter(t => t.status === (hasActive ? 'active' : 'paused'));
   if (targets.length === 0) {
-    if (uiModule) uiModule.showToast('No tasks to ' + (hasActive ? 'pause' : 'resume'));
+    if (uiModule) uiModule.showToast(hasActive ? t('tasks.no_tasks_to_pause') : t('tasks.no_tasks_to_resume'));
     return;
   }
   const verb = hasActive ? 'Pause' : 'Resume';
   let confirmed = true;
   if (uiModule?.styledConfirm) {
     confirmed = await uiModule.styledConfirm(
-      `${verb} all ${targets.length} ${hasActive ? 'active' : 'paused'} task(s)?`,
-      { confirmText: verb + ' all' }
+      t('tasks.toggle_all_confirm', { action: verb.toLowerCase(), count: targets.length, status: hasActive ? 'active' : 'paused' }),
+      { confirmText: t('common.action_all', { action: verb }) }
     );
   } else if (typeof confirm === 'function') {
-    confirmed = confirm(`${verb} ${targets.length} task(s)?`);
+    confirmed = confirm(t('tasks.toggle_all_confirm_short', { action: verb.toLowerCase(), count: targets.length }));
   }
   if (!confirmed) return;
   let ok = 0, fails = [];
@@ -1712,8 +1854,8 @@ async function _doToggleAll() {
     }
   }
   if (uiModule) {
-    if (fails.length === 0) uiModule.showToast(`${verb}d all ${ok} task(s)`);
-    else uiModule.showError(`${verb}d ${ok}/${targets.length} — failed: ${fails.slice(0, 3).join(', ')}`);
+    if (fails.length === 0) uiModule.showToast(t('tasks.toggle_all_success', { action: verb.toLowerCase(), count: ok }));
+    else uiModule.showError(t('tasks.toggle_all_failed', { action: verb.toLowerCase(), ok, total: targets.length, errors: fails.slice(0, 3).join(', ') }));
   }
   await _fetchTasks();
   _renderMainView();
@@ -1821,6 +1963,17 @@ async function _renderActivityView() {
       return;
     }
     list.innerHTML = _stackActivityEntries(filtered).map(_renderActivityEntry).join('');
+    if (_activityHasMore && !q) {
+      list.insertAdjacentHTML('beforeend', `
+        <button type="button" class="memory-toolbar-btn tasks-activity-load-more" id="tasks-activity-load-more" style="width:100%;justify-content:center;margin-top:6px;">
+          Load more
+        </button>
+      `);
+      list.querySelector('#tasks-activity-load-more')?.addEventListener('click', () => {
+        _activityLimit = Math.min(200, _activityLimit + 40);
+        _renderActivityView();
+      });
+    }
     _wireActivityRows(list);
   };
 
@@ -1880,10 +2033,11 @@ async function _renderActivityView() {
   }
 
   try {
-    const res = await fetch(`${API_BASE}/api/tasks/runs/recent?limit=100`, { credentials: 'same-origin' });
+    const res = await fetch(`${API_BASE}/api/tasks/runs/recent?limit=${_activityLimit}&max_result_chars=6000`, { credentials: 'same-origin' });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     const runs = data.runs || [];
+    _activityHasMore = !!data.has_more && _activityLimit < 200;
     const list = document.getElementById('tasks-activity-list');
     if (!list) return;
     if (runs.length === 0) {
@@ -1925,6 +2079,8 @@ async function _renderActivityView() {
 }
 
 let _activityEntries = [];
+let _activityLimit = 40;
+let _activityHasMore = false;
 
 function _stackActivityEntries(entries) {
   const out = [];
@@ -2059,10 +2215,10 @@ function _wireActivityRows(list) {
       if (!entry?.taskId) return;
       try {
         await _stopTask(entry.taskId);
-        uiModule.showToast('Task stopped');
+        uiModule.showToast(t('tasks.stopped'));
         _renderActivityView();
       } catch (err) {
-        uiModule.showError(err.message || 'Failed to stop task');
+        uiModule.showError(err.message || t('tasks.stop_failed'));
       }
     });
     row.querySelector('.task-log-run-again')?.addEventListener('click', (e) => {
@@ -2079,8 +2235,8 @@ function _wireActivityRows(list) {
       const txt = `${entry.taskName || ''}\n${entry.result || ''}`.trim();
       try {
         uiModule.copyToClipboard(txt);
-        uiModule.showToast('Log copied');
-      } catch (_) { uiModule.showError('Copy failed'); }
+        uiModule.showToast(t('tasks.log_copied'));
+      } catch (_) { uiModule.showError(t('tasks.copy_failed')); }
     });
     row.querySelector('.task-log-clear-cache')?.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -2145,10 +2301,10 @@ async function _openResultInChat(entry) {
     if (model) fd.append('model', model);
     if (epId) fd.append('endpoint_id', epId);
     const res = await fetch(`${API_BASE}/api/session`, { method: 'POST', credentials: 'same-origin', body: fd });
-    if (!res.ok) { uiModule.showToast(`Couldn't create chat (HTTP ${res.status})`); return; }
+    if (!res.ok) { uiModule.showToast(t('tasks.chat_create_failed', { status: res.status })); return; }
     const sess = await res.json();
     const sid = sess.id || sess.session_id;
-    if (!sid) { uiModule.showToast('Chat created but no session id returned'); return; }
+    if (!sid) { uiModule.showToast(t('tasks.chat_no_session')); return; }
 
     // Seed the conversation: a framing user line + the result as assistant.
     await fetch(`${API_BASE}/api/session/${sid}/inject_messages`, {
@@ -2166,7 +2322,7 @@ async function _openResultInChat(entry) {
       if (window.sessionModule.selectSession) window.sessionModule.selectSession(sid);
     }
   } catch (e) {
-    uiModule.showToast(`Open in chat failed: ${e.message || e}`);
+    uiModule.showToast(t('tasks.open_chat_failed', { error: e.message || e }));
   }
 }
 
@@ -2423,7 +2579,7 @@ async function _aiDraftTask(inputEl, btnEl) {
     });
     const data = await res.json();
     if (!data.success || !data.draft) {
-      if (uiModule) uiModule.showError(data.message || 'Could not draft task');
+      if (uiModule) uiModule.showError(data.message || t('tasks.draft_failed'));
       return;
     }
     const draft = data.draft;
@@ -2437,7 +2593,7 @@ async function _aiDraftTask(inputEl, btnEl) {
     // field but still creates via POST on save.
     _showForm(draft, draft.task_type, draft.trigger_type || 'schedule');
   } catch (e) {
-    if (uiModule) uiModule.showError('AI draft failed: ' + (e.message || e));
+    if (uiModule) uiModule.showError(t('tasks.ai_draft_failed', { error: e.message || e }));
   } finally {
     try { _sp.stop(); } catch (_) {}
     btnEl.classList.remove('spinning');
@@ -2511,6 +2667,7 @@ function _renderMainView() {
 // ---- Modal ----
 
 export function openTasks(focusId, opts) {
+  startNotificationPolling();
   const o = opts || {};
   const openActivityForFailure = _taskFailurePending && !focusId && o.filter === undefined;
   _setTaskFailurePending(false);
@@ -2703,7 +2860,7 @@ async function _pollTaskNotifications() {
       // — show it as a real browser Notification (richer than a toast). Falls
       // back to a toast when permission is denied or unavailable.
       if (ok && n.body) {
-        const title = n.task_name || 'Task';
+        const title = n.task_name || t('tasks.notification_default_title');
         let fired = false;
         try {
           if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
@@ -2711,15 +2868,14 @@ async function _pollTaskNotifications() {
             fired = true;
           }
         } catch (_) {}
-        if (!fired && uiModule) uiModule.showToast(title + ': ' + n.body.slice(0, 140), { duration: 7000 });
+        if (!fired && uiModule) uiModule.showToast(t('tasks.notification_body', { title, body: n.body.slice(0, 140) }), { duration: 7000 });
         continue;
       }
-      const msg = `Task ${ok ? 'finished' : 'failed'}: ${n.task_name}`;
       if (!uiModule) continue;
-      if (ok) uiModule.showToast(msg, { duration: 5000 });
+      if (ok) uiModule.showToast(t('tasks.notification_finished', { name: n.task_name }), { duration: 5000 });
       else {
         _setTaskFailurePending(true);
-        uiModule.showError(msg);
+        uiModule.showError(t('tasks.notification_failed', { name: n.task_name }));
         if (_open && document.querySelector('.tasks-tab.active[data-tab="activity"]')) {
           _renderActivityView();
         }
@@ -2741,9 +2897,6 @@ function stopNotificationPolling() {
     _notifInterval = null;
   }
 }
-
-// Start polling on module load
-startNotificationPolling();
 
 const tasksModule = { openTasks, closeTasks, isTasksOpen, startNotificationPolling, stopNotificationPolling };
 export default tasksModule;

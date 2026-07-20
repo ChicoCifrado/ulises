@@ -1,0 +1,18 @@
+{
+  "document": {
+    "create_failed": "Failed to create document: {error}",
+    "not_found": "Document not found",
+    "update_failed": "Failed to update document: {error}",
+    "upload_failed": "Upload failed: {error}",
+    "pdf_not_located": "Saved PDF could not be located",
+    "pdf_no_source": "Document is not a PDF — no pdf_source marker found",
+    "source_pdf_not_located": "Source PDF could not be located",
+    "extraction_failed": "Extraction failed: {error}",
+    "no_documents_specified": "No documents specified",
+    "no_documents_found": "No documents found",
+    "all_already_reviewed": "All documents already reviewed",
+    "auth_required": "Authentication required",
+    "session_not_found": "Session not found",
+    "pdf_viewer_unavailable": "PDF viewer unavailable: {error}"
+  }
+}

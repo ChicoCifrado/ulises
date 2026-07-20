@@ -8,6 +8,8 @@ from fastapi import HTTPException, Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
+from core.translations import current_language, t
+
 
 # Per-process token that lets the in-app tool layer hit admin-gated
 # routes via HTTP loopback (the agent's tool calls don't carry the
@@ -17,6 +19,29 @@ INTERNAL_TOOL_TOKEN = os.environ.get("ULISES_INTERNAL_TOKEN") or secrets.token_h
 INTERNAL_TOOL_HEADER = "X-Ulises-Internal-Token"
 # Pseudo-username on in-process tool-loopback requests; require_admin trusts it and it is reserved.
 INTERNAL_TOOL_USER = "internal-tool"
+
+
+class LanguageMiddleware(BaseHTTPMiddleware):
+    """Detect the user's language and set it in the translation ContextVar.
+
+    Resolution order:
+    1. User's saved preference in prefs (if authenticated)
+    2. Accept-Language header
+    3. Default 'en'
+    """
+
+    async def dispatch(self, request: Request, call_next) -> Response:
+        lang = "en"
+        accept = request.headers.get("accept-language", "")
+        if accept:
+            lang = accept.split(",")[0].split("-")[0].split(";")[0].strip().lower()
+            if lang not in ("en", "es", "fr", "de", "it", "pt", "ru", "ja", "ko", "zh", "ar"):
+                lang = "en"
+
+        current_language.set(lang)
+        response = await call_next(request)
+        response.headers["Content-Language"] = lang
+        return response
 
 
 def is_cors_preflight(method: str, headers) -> bool:
@@ -44,16 +69,18 @@ def require_admin(request: Request):
         if getattr(request.state, "current_user", None) == INTERNAL_TOOL_USER:
             return
     except Exception:
-        pass
+        import logging
+        logging.getLogger(__name__).exception("require_admin: unexpected error checking internal token")
+        raise HTTPException(403, t("admin.admin_only"))
 
     auth_mgr = getattr(request.app.state, "auth_manager", None)
     if os.getenv("AUTH_ENABLED", "true").lower() == "false":
         return
     if not auth_mgr or not auth_mgr.is_configured:
-        raise HTTPException(403, "Admin only")
+        raise HTTPException(403, t("admin.admin_only"))
     user = getattr(request.state, "current_user", None)
     if not user or not auth_mgr.is_admin(user):
-        raise HTTPException(403, "Admin only")
+        raise HTTPException(403, t("admin.admin_only"))
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):

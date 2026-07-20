@@ -1,0 +1,18 @@
+{
+  "admin": {
+    "admin_only": "Admin only",
+    "user_not_found": "User not found",
+    "cannot_demote_last_admin": "Cannot demote the last admin",
+    "cannot_delete_user": "Cannot delete user",
+    "cannot_rename_user": "Cannot rename user",
+    "rename_failed": "Failed to rename user data",
+    "features_not_available": "Feature not available",
+    "not_authenticated": "Not authenticated",
+    "internal_error": "Internal error",
+    "no_models_found": "No models found or endpoint offline",
+    "workspace_admin_only": "Workspace browsing is admin-only",
+    "workspace_selection_admin": "Workspace selection is admin-only",
+    "integration_not_found": "Integration not found",
+    "api_token_not_scoped": "API token is not scoped for chat"
+  }
+}

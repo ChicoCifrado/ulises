@@ -1,0 +1,9 @@
+{
+  "youtube": {
+    "api_unavailable": "API de transcripción de YouTube no disponible",
+    "failed_after_retries": "Falló después de {{count}} intentos",
+    "yt_dlp_failed": "yt-dlp falló: {{error}}",
+    "comment_fetch_timed_out": "La obtención de comentarios agotó el tiempo de espera",
+    "yt_dlp_not_installed": "yt-dlp no instalado"
+  }
+}

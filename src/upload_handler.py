@@ -13,6 +13,7 @@ from datetime import datetime, timedelta
 from typing import Dict, Any, Optional
 from fastapi import HTTPException, UploadFile
 
+from core.translations import t
 from src.upload_limits import format_byte_limit, get_chat_upload_max_bytes
 
 
@@ -112,6 +113,10 @@ class UploadHandler:
         except Exception:
             self.file_detector = None
             logger.warning("python-magic not available, falling back to basic detection")
+
+        # In-memory index cache to avoid O(N) disk I/O on every request
+        self._index_cache: Optional[Dict[str, Any]] = None
+        self._index_mtime: float = 0.0
     
     def inside_base_dir(self, path: str) -> bool:
         """Check if path is inside base directory"""
@@ -317,6 +322,13 @@ class UploadHandler:
                 except OSError:
                     pass
             os.replace(tmp, path)
+            # Update cache if this is the main index
+            if path.endswith("uploads.json"):
+                self._index_cache = data
+                try:
+                    self._index_mtime = os.path.getmtime(path)
+                except OSError:
+                    self._index_mtime = time.time()
         except Exception:
             try:
                 os.unlink(tmp)
@@ -325,22 +337,40 @@ class UploadHandler:
             raise
 
     def _load_upload_index(self) -> Dict[str, Any]:
+        """Load the upload index from disk/cache. Uses mtime-based validation
+        to avoid redundant parsing on hot paths.
+        """
         uploads_db_path = os.path.join(self.upload_dir, "uploads.json")
         if not os.path.exists(uploads_db_path):
+            self._index_cache = {}
+            self._index_mtime = 0.0
             return {}
+
+        # Check cache validity
+        try:
+            mtime = os.path.getmtime(uploads_db_path)
+            if self._index_cache is not None and mtime <= self._index_mtime:
+                return self._index_cache
+        except OSError:
+            mtime = 0.0
+
         # Try the live file first, fall back to the .bak sibling if the
-        # live file is truncated/corrupted (e.g. a previous writer was
-        # SIGKILL'd mid-rename before the new code path was deployed).
+        # live file is truncated/corrupted.
         for candidate in (uploads_db_path, uploads_db_path + ".bak"):
             if not os.path.exists(candidate):
                 continue
             try:
                 with open(candidate, "r", encoding="utf-8") as f:
                     data = json.load(f)
-                return data if isinstance(data, dict) else {}
+                if isinstance(data, dict):
+                    self._index_cache = data
+                    self._index_mtime = mtime
+                    return data
             except Exception as e:
                 logger.warning(f"Failed to read uploads database ({candidate}): {e}")
                 continue
+
+        self._index_cache = {}
         return {}
 
     def get_upload_info(self, upload_id: str) -> Optional[Dict[str, Any]]:
@@ -353,14 +383,23 @@ class UploadHandler:
         return None
 
     def _renamed_upload_index_key(self, key: str, info: Dict[str, Any], old_owner: str, new_owner: str) -> str:
-        """Return the storage key to use after renaming an owned upload row."""
-        if isinstance(key, str) and ":" in key:
-            owner_part, rest = key.split(":", 1)
-            if owner_part.strip().lower() == old_owner:
-                return f"{new_owner}:{rest}"
+        """Return the storage key to use after renaming an owned upload row.
+
+        Harden against usernames with colons by using the explicit metadata
+        fields instead of trying to parse the key string.
+        """
         file_hash = info.get("hash")
         if file_hash:
             return f"{new_owner}:{file_hash}"
+
+        # Fallback for rows without an explicit hash (should not happen in modern Odysseus)
+        if isinstance(key, str) and ":" in key:
+            # Join all but the last part if there are multiple colons
+            parts = key.rsplit(":", 1)
+            if len(parts) == 2:
+                owner_part, rest = parts[0], parts[1]
+                if owner_part.strip().lower() == old_owner.strip().lower():
+                    return f"{new_owner}:{rest}"
         return key
 
     def _unique_upload_index_key(self, base_key: str, used_keys: set, reserved_keys: set, info: Dict[str, Any]) -> str:
@@ -543,11 +582,8 @@ class UploadHandler:
             total_size = 0
             file_types = {}
             
-            uploads_db_path = os.path.join(self.upload_dir, "uploads.json")
-            if os.path.exists(uploads_db_path):
-                with open(uploads_db_path, "r", encoding="utf-8") as f:
-                    files = json.load(f)
-                
+            files = self._load_upload_index()
+            if files:
                 total_files = len(files)
                 for file_info in files.values():
                     total_size += file_info.get("size", 0)
@@ -581,7 +617,7 @@ class UploadHandler:
             if len(self.upload_rate_log[client_ip]) >= self.upload_rate_limit:
                 raise HTTPException(
                     status_code=429,
-                    detail="Upload rate limit exceeded. Please try again later."
+                    detail=t("upload.rate_limited")
                 )
             
             self.upload_rate_log[client_ip].append(now)
@@ -597,12 +633,12 @@ class UploadHandler:
         file_obj.seek(0)
         
         if file_size == 0:
-            raise HTTPException(400, "File is empty")
+            raise HTTPException(400, t("upload.file_empty"))
             
         if file_size > self.max_upload_size:
             raise HTTPException(
                 status_code=400,
-                detail=f"File size exceeds {format_byte_limit(self.max_upload_size)} limit"
+                detail=t("upload.file_too_large").format(limit=format_byte_limit(self.max_upload_size))
             )
         
         # Get original filename and sanitize it
@@ -616,7 +652,7 @@ class UploadHandler:
         if not self.is_safe_file_type(content_type, safe_filename):
             raise HTTPException(
                 status_code=400,
-                detail=f"File type not allowed: {content_type}"
+                detail=t("upload.file_type_not_allowed").format(content_type=content_type)
             )
         
         # Calculate file hash for deduplication
@@ -706,7 +742,7 @@ class UploadHandler:
                 while chunk := file_obj.read(8192):
                     f.write(chunk)
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
+            raise HTTPException(status_code=500, detail=t("upload.save_failed").format(error=str(e)))
         
         # Create file metadata
         file_metadata = {

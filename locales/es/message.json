@@ -1,0 +1,17 @@
+{
+  "message": {
+    "required": "El mensaje es obligatorio",
+    "cannot_be_empty": "El mensaje no puede estar vacío",
+    "exceeds_max_length": "El mensaje supera la longitud máxima",
+    "no_file_or_invalid": "No se subió ningún archivo o el nombre del archivo es inválido",
+    "file_empty": "El archivo está vacío",
+    "file_read_error": "Error al leer archivo: {error}",
+    "file_too_large": "El archivo excede el límite de {limit}",
+    "invalid_json_body": "Cuerpo JSON inválido",
+    "missing_parameters": "Faltan parámetros requeridos",
+    "request_processing_error": "Error al procesar la solicitud",
+    "session_id_required": "Se requiere ID de sesión",
+    "session_not_found": "Sesión '{session_id}' no encontrada",
+    "unsupported_file_type": "Tipo de archivo '{ext}' no permitido"
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "tasks": {
+    "not_found": "Task not found",
+    "not_assistant_task": "Not an assistant task"
+  }
+}

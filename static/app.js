@@ -3,6 +3,7 @@
 // ES6 module — entry point, no exports (wires all modules together)
 // ============================================
 import Storage from './js/storage.js';
+import { init as i18nInit, setLanguage as i18nSetLanguage, getCurrentLang as i18nGetLang } from './js/i18n.js';
 import uiModule from './js/ui.js';
 import workspaceModule from './js/workspace.js';
 import fileHandlerModule from './js/fileHandler.js';
@@ -53,6 +54,135 @@ window.uiModule = uiModule;
 window.adminModule = adminModule;
 window.cookbookModule = cookbookModule;
 
+function _isMobileChatInput() {
+  return window.innerWidth <= 768 || (window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+}
+
+function _isForegroundChatBusy() {
+  const sendBtn = document.querySelector('.send-btn');
+  return !!window.__odysseusChatBusy
+    || Date.now() < (window.__odysseusChatBusyUntil || 0)
+    || !!document.querySelector('.send-btn[data-mode="streaming"], .send-btn.send-pending')
+    || (sendBtn && (sendBtn.title || '').toLowerCase().includes('stop'));
+}
+
+function _shouldQueueFromMobileEnter(e, input) {
+  return e.key === 'Enter'
+    && !e.shiftKey
+    && !e.ctrlKey
+    && !e.metaKey
+    && !e.altKey
+    && !e.isComposing
+    && _isMobileChatInput()
+    && _isForegroundChatBusy()
+    && !!(input && input.value && input.value.trim());
+}
+
+function _shouldQueueFromMobileLineBreak(input) {
+  return _isMobileChatInput()
+    && _isForegroundChatBusy()
+    && !!(input && input.value && input.value.trim());
+}
+
+function _isLineBreakInputEvent(e) {
+  return e
+    && (e.inputType === 'insertLineBreak'
+      || e.inputType === 'insertParagraph'
+      || e.data === '\n');
+}
+
+function _submitMobileQueuedInput(input) {
+  if (!input || !_shouldQueueFromMobileLineBreak(input)) return false;
+  const now = Date.now();
+  const last = Number(input.dataset.mobileQueueSubmitAt || 0);
+  if (now - last < 300) return true;
+  input.dataset.mobileQueueSubmitAt = String(now);
+  if (chatModule && chatModule.queueStreamingComposerRequest && chatModule.queueStreamingComposerRequest()) {
+    return true;
+  }
+  window.__odysseusQueueStreamingSubmit = now;
+  const form = document.getElementById('chat-form');
+  const submitBtn = form && form.querySelector('button[type="submit"]');
+  if (submitBtn) submitBtn.click();
+  else if (form) form.requestSubmit ? form.requestSubmit() : form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  return true;
+}
+
+function _syncMobileEnterKeyHint(input) {
+  if (!input) return;
+  input.setAttribute('enterkeyhint', (_isMobileChatInput() && _isForegroundChatBusy()) ? 'send' : 'enter');
+}
+
+function _countLineBreaks(s) {
+  return ((s || '').match(/\n/g) || []).length;
+}
+
+function initForegroundActivityHeartbeat() {
+  let lastSent = 0;
+  const minGapMs = 12000;
+  const send = (force = false) => {
+    if (document.visibilityState === 'hidden') return;
+    const now = Date.now();
+    if (!force && now - lastSent < minGapMs) return;
+    lastSent = now;
+    try {
+      if (navigator.sendBeacon) {
+        const body = new Blob(['{}'], { type: 'application/json' });
+        if (navigator.sendBeacon('/api/activity/heartbeat', body)) return;
+      }
+    } catch (_) {}
+    fetch('/api/activity/heartbeat', {
+      method: 'POST',
+      credentials: 'same-origin',
+      keepalive: true,
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    }).catch(() => {});
+  };
+  send(true);
+  window.addEventListener('focus', () => send(true));
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'hidden') send(true);
+  });
+  ['pointerdown', 'keydown', 'touchstart', 'scroll'].forEach(type => {
+    window.addEventListener(type, () => send(false), { passive: true, capture: true });
+  });
+  setInterval(() => send(false), 15000);
+}
+initForegroundActivityHeartbeat();
+
+function initRailHoverLabels() {
+  const labels = {
+    'rail-search-btn': 'Search',
+    'rail-new-session': 'New',
+    'rail-delete-session': 'Delete',
+    'rail-chats': 'Chat',
+    'rail-documents': 'Docs',
+    'rail-calendar': 'Calendar',
+    'rail-compare': 'Compare',
+    'rail-cookbook': 'Cookbook',
+    'rail-research': 'Research',
+    'rail-email': 'Email',
+    'rail-gallery': 'Gallery',
+    'rail-archive': 'Library',
+    'rail-memory': 'Brain',
+    'rail-notes': 'Notes',
+    'rail-tasks': 'Tasks',
+    'rail-theme': 'Theme',
+    'rail-settings': 'Settings',
+  };
+  document.querySelectorAll('#icon-rail .icon-rail-btn').forEach(btn => {
+    if (btn.querySelector('.rail-hover-label')) return;
+    const label = labels[btn.id] || btn.getAttribute('aria-label') || btn.getAttribute('title') || '';
+    if (!label) return;
+    const span = document.createElement('span');
+    span.className = 'rail-hover-label';
+    span.textContent = String(label).replace(/\s*\([^)]*\)\s*/g, '').trim();
+    btn.appendChild(span);
+  });
+}
+
+
 // Redirect to login on 401 from any fetch
 const _origFetch = window.fetch;
 window.fetch = async function(...args) {
@@ -72,16 +202,21 @@ const el = uiModule.el;
 // changes take effect immediately (previously cached once at page load and
 // went stale when the user changed their default model).
 let _defaultChat = null;
+let _defaultChatPromise = null;
 async function _refreshDefaultChat() {
-  try {
-    const d = await (await fetch('/api/default-chat')).json();
-    if (d && d.endpoint_url && d.model) {
-      _defaultChat = d;
-      try { window.__ulisesDefaultChat = d; } catch (_) {}
-      return d;
-    }
-  } catch (_) {}
-  return null;
+  if (_defaultChatPromise) return _defaultChatPromise;
+  _defaultChatPromise = (async () => {
+    try {
+      const d = await (await fetch('/api/default-chat')).json();
+      if (d && d.endpoint_url && d.model) {
+        _defaultChat = d;
+        try { window.__ulisesDefaultChat = d; } catch (_) {}
+        return d;
+      }
+    } catch (_) {}
+    return null;
+  })();
+  return _defaultChatPromise;
 }
 // Prime the cache once at load for initial paint paths that read _defaultChat
 // synchronously; later reads should call _refreshDefaultChat() first.
@@ -268,11 +403,13 @@ function initializeEventListeners() {
     const _sidebarEl = el('sidebar');
     if (_sidebarEl) {
       let _wasHidden = _sidebarEl.classList.contains('hidden');
-      new MutationObserver(() => {
+      const obs = new MutationObserver(() => {
         const nowHidden = _sidebarEl.classList.contains('hidden');
         if (_wasHidden && !nowHidden) window.closeAllPopups();
         _wasHidden = nowHidden;
-      }).observe(_sidebarEl, { attributes: true, attributeFilter: ['class'] });
+      });
+      obs.observe(_sidebarEl, { attributes: true, attributeFilter: ['class'] });
+      (window.__appObservers || (window.__appObservers = [])).push(obs);
     }
     // Clicking session name also opens dropdown
     const currentMeta = el('current-meta');
@@ -424,14 +561,17 @@ function initializeEventListeners() {
       input.focus();
       input.select();
 
+      let _renameGuard = false;
       const commit = async () => {
+        if (_renameGuard) return;
+        _renameGuard = true;
         const newName = input.value.trim();
         if (newName && newName !== currentName) {
           // Materialize a pending (new) chat first so it has an id to rename.
           if (!sid && sessionModule.materializePendingSession) {
             try { await sessionModule.materializePendingSession(); sid = sessionModule.getCurrentSessionId(); } catch (_) {}
           }
-          if (!sid) { metaEl.textContent = newName; return; }
+          if (!sid) { metaEl.textContent = newName; _renameGuard = false; return; }
           const fd = new FormData();
           fd.append('name', newName);
           await fetch(`${API_BASE}/api/session/${sid}`, { method: 'PATCH', body: fd });
@@ -443,6 +583,7 @@ function initializeEventListeners() {
         } else {
           metaEl.textContent = origText;
         }
+        _renameGuard = false;
       };
       input.addEventListener('blur', commit);
       input.addEventListener('keydown', (ev) => {
@@ -840,8 +981,8 @@ function initializeEventListeners() {
     toolCookbookBtn.addEventListener('click', async () => {
       if (!cookbookModule) return;
       // Try minimized→restore or open→minimize via the manager first
-      const Modals = await import('./js/modalManager.js');
-      if (!Modals.toggle('cookbook-modal')) {
+      const Modals = await import('./js/modalManager.js').catch(e => { console.warn('Failed to load modalManager', e); return null; });
+      if (!Modals || !Modals.toggle('cookbook-modal')) {
         // Not registered yet → fresh open
         cookbookModule.open();
       }
@@ -868,8 +1009,8 @@ function initializeEventListeners() {
   if (toolGalleryBtn) {
     toolGalleryBtn.addEventListener('click', async () => {
       if (!galleryModule) return;
-      const Modals = await import('./js/modalManager.js');
-      if (!Modals.toggle('gallery-modal')) {
+      const Modals = await import('./js/modalManager.js').catch(e => { console.warn('Failed to load modalManager', e); return null; });
+      if (!Modals || !Modals.toggle('gallery-modal')) {
         if (galleryModule.isGalleryOpen()) galleryModule.closeGallery();
         else galleryModule.openGallery();
       }
@@ -897,10 +1038,10 @@ function initializeEventListeners() {
   if (toolCalendarBtn) {
     toolCalendarBtn.addEventListener('click', async () => {
       if (!calendarModule) return;
-      const Modals = await import('./js/modalManager.js');
+      const Modals = await import('./js/modalManager.js').catch(e => { console.warn('Failed to load modalManager', e); return null; });
       // toggle returns true when a registered modal was minimized/restored;
       // returns false when nothing is registered → open fresh.
-      if (!Modals.toggle('calendar-modal')) {
+      if (!Modals || !Modals.toggle('calendar-modal')) {
         if (calendarModule.isCalendarOpen()) calendarModule.closeCalendar();
         else calendarModule.openCalendar();
       }
@@ -2067,10 +2208,11 @@ function initializeEventListeners() {
     }
 
     // Observe active class changes to sync mirror states
-    const observer = new MutationObserver(() => syncMirrorStates());
+    const toolbarObserver = new MutationObserver(() => syncMirrorStates());
     collapsibleBtns.forEach(btn => {
-      observer.observe(btn, { attributes: true, attributeFilter: ['class'] });
+      toolbarObserver.observe(btn, { attributes: true, attributeFilter: ['class'] });
     });
+    (window.__appObservers || (window.__appObservers = [])).push(toolbarObserver);
 
     // Run on resize and on load
     window.addEventListener('resize', () => requestAnimationFrame(checkToolbarOverflow));
@@ -2082,12 +2224,14 @@ function initializeEventListeners() {
     // Also re-check when sidebar visibility changes
     const sidebarEl = el('sidebar');
     if (sidebarEl) {
-      new MutationObserver(() => requestAnimationFrame(checkToolbarOverflow))
-        .observe(sidebarEl, { attributes: true, attributeFilter: ['class'] });
+      const obs = new MutationObserver(() => requestAnimationFrame(checkToolbarOverflow));
+      obs.observe(sidebarEl, { attributes: true, attributeFilter: ['class'] });
+      (window.__appObservers || (window.__appObservers = [])).push(obs);
     }
     // Re-check when doc panel opens/closes (body.doc-view toggled)
-    new MutationObserver(() => requestAnimationFrame(checkToolbarOverflow))
-      .observe(document.body, { attributes: true, attributeFilter: ['class'] });
+    const bodyObserver = new MutationObserver(() => requestAnimationFrame(checkToolbarOverflow));
+    bodyObserver.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+    (window.__appObservers || (window.__appObservers = [])).push(bodyObserver);
     // Re-check when input bar itself resizes (e.g. doc panel drag)
     const inputBottom = inputLeft.parentElement;
     if (inputBottom) {
@@ -2874,7 +3018,7 @@ function initializeEventListeners() {
     document.querySelectorAll('.modal').forEach(injectMinimizeButton);
 
     // Watch for dynamically-created modals
-    new MutationObserver((mutations) => {
+    const modalObserver = new MutationObserver((mutations) => {
       for (const m of mutations) {
         for (const n of m.addedNodes) {
           if (n.nodeType !== 1) continue;
@@ -2886,7 +3030,11 @@ function initializeEventListeners() {
           }
         }
       }
-    }).observe(document.body, { childList: true, subtree: true });
+    });
+    // Scope to the main layout container instead of document.body with subtree:true
+    const appContainer = document.getElementById('app') || document.body;
+    modalObserver.observe(appContainer, { childList: true, subtree: true });
+    (window.__appObservers || (window.__appObservers = [])).push(modalObserver);
   })();
 
   // Preset button (in overflow menu)
@@ -3116,17 +3264,38 @@ function initializeEventListeners() {
   // Textarea auto-resize
   const textarea = el('message');
   if (textarea) {
+    _syncMobileEnterKeyHint(textarea);
+    window.addEventListener('odysseus:chat-busy-change', () => _syncMobileEnterKeyHint(textarea));
     uiModule.autoResize(textarea);
-    textarea.addEventListener('input', () => {
+    let previousTextareaValue = textarea.value || '';
+    textarea.addEventListener('beforeinput', (e) => {
+      if (_isLineBreakInputEvent(e) && _shouldQueueFromMobileLineBreak(textarea)) {
+        e.preventDefault();
+        e.stopPropagation();
+        _submitMobileQueuedInput(textarea);
+      }
+    });
+    textarea.addEventListener('input', (e) => {
+      const currentValue = textarea.value || '';
+      const insertedLineBreak = _isLineBreakInputEvent(e)
+        || _countLineBreaks(currentValue) > _countLineBreaks(previousTextareaValue);
+      if (insertedLineBreak && _shouldQueueFromMobileLineBreak(textarea)) {
+        textarea.value = currentValue.replace(/\n+$/g, '');
+        previousTextareaValue = textarea.value || '';
+        _submitMobileQueuedInput(textarea);
+        return;
+      }
+      previousTextareaValue = currentValue;
       uiModule.autoResize(textarea);
+      _syncMobileEnterKeyHint(textarea);
     });
     textarea.addEventListener('paste', () => {
       setTimeout(() => uiModule.autoResize(textarea), 1);
     });
     textarea.addEventListener('keydown', (e) => {
-      const isMobile = window.innerWidth <= 768
+      const isMobile = _isMobileChatInput();
 
-      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && !isMobile) {
+      if (_shouldQueueFromMobileEnter(e, textarea) || (e.key === 'Enter' && !e.shiftKey && !e.isComposing && !isMobile)) {
         // If ghost autocomplete is active, accept the suggestion instead of submitting
         if (window._ghostAutocomplete && window._ghostAutocomplete.isActive()) {
           e.preventDefault();
@@ -3139,8 +3308,14 @@ function initializeEventListeners() {
         // Check if already submitting before triggering form submission
         const form = el('chat-form');
         if (form) {
-         const submitBtn = form.querySelector('button[type="submit"]');
-         if (submitBtn) submitBtn.click();
+          if (_isForegroundChatBusy() && textarea.value && textarea.value.trim()) {
+            if (chatModule && chatModule.queueStreamingComposerRequest && chatModule.queueStreamingComposerRequest()) {
+              return;
+            }
+            window.__odysseusQueueStreamingSubmit = Date.now();
+          }
+          const submitBtn = form.querySelector('button[type="submit"]');
+          if (submitBtn) submitBtn.click();
         }
       }
     });
@@ -3342,6 +3517,9 @@ function startUlisesApp() {
   window.__ulisesAppStarted = true;
   // Set CSS variables
   document.documentElement.style.setProperty('--line-height', '20px');
+  // Initialize i18n (lazy — does not block other init)
+  i18nInit().catch(e => console.warn('[i18n] Init failed, using English:', e));
+  initRailHoverLabels();
 
   // Smooth keyboard open/close on mobile — keep chat scrolled to bottom
   if (window.visualViewport && 'ontouchstart' in window) {
@@ -3561,10 +3739,31 @@ function startUlisesApp() {
     return fileHandlerModule.getPendingCount && fileHandlerModule.getPendingCount() > 0;
   }
 
+  function _updateStreamingSubmitButton() {
+    if (!sendBtn || sendBtn.dataset.mode !== 'streaming') return false;
+    const hasText = messageInput && messageInput.value.trim().length > 0;
+    const nextPhase = hasText ? 'queue' : 'processing';
+    if (sendBtn.dataset.phase === nextPhase) return true;
+    sendBtn.dataset.phase = nextPhase;
+    sendBtn.classList.remove('mic-mode', 'newchat-mode', 'newchat-expanded', 'anim-spin', 'anim-launch', 'anim-land');
+    if (hasText) {
+      sendBtn.innerHTML = _sendIcon;
+      sendBtn.title = 'Queue message';
+    } else {
+      sendBtn.innerHTML = _stopIcon;
+      sendBtn.title = 'Stop generation';
+    }
+    return true;
+  }
+
   function _updateSendBtnIcon() {
     if (!sendBtn) return;
-    // Don't override if streaming (stop button) or recording
-    if (sendBtn.dataset.mode === 'streaming' || sendBtn.dataset.mode === 'recording') return;
+    if (sendBtn.dataset.mode === 'streaming') {
+      _updateStreamingSubmitButton();
+      return;
+    }
+    // Don't override if recording
+    if (sendBtn.dataset.mode === 'recording') return;
     const prevMode = sendBtn.dataset.mode || '';
     const hasText = messageInput && messageInput.value.trim().length > 0;
     const hasFiles = _hasAttachments();
@@ -3660,6 +3859,12 @@ function startUlisesApp() {
       const hasText = messageInput && messageInput.value.trim().length > 0;
       const hasFiles = _hasAttachments();
 
+      if (sendBtn.dataset.mode === 'streaming') {
+        if (hasText) window.__odysseusQueueStreamingSubmit = Date.now();
+        handleSubmit(e);
+        return;
+      }
+
       // New chat mode — empty input, no attachments, no STT
       if (!hasText && !hasFiles && sendBtn.dataset.mode === 'newchat') {
         if (sessionModule) {
@@ -3699,9 +3904,10 @@ function startUlisesApp() {
   // Enter to send (shift+enter for newline), or new chat when empty
   if (messageInput) {
     messageInput.addEventListener('keydown', (e) => {
-      const isMobile = window.innerWidth <= 768
+      if (e.defaultPrevented) return;
+      const isMobile = _isMobileChatInput();
 
-      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && !isMobile) {
+      if (_shouldQueueFromMobileEnter(e, messageInput) || (e.key === 'Enter' && !e.shiftKey && !e.isComposing && !isMobile)) {
         e.preventDefault();
         // Flush the debounced icon update so dataset.mode reflects the current
         // text state. Without this, a fast type-and-Enter would still see the
@@ -3711,6 +3917,12 @@ function startUlisesApp() {
           const railNew = el('rail-new-session');
           if (railNew) railNew.click();
           return;
+        }
+        if (_isForegroundChatBusy() && messageInput.value && messageInput.value.trim()) {
+          if (chatModule && chatModule.queueStreamingComposerRequest && chatModule.queueStreamingComposerRequest()) {
+            return;
+          }
+          window.__odysseusQueueStreamingSubmit = Date.now();
         }
         handleSubmit(e);
       }
@@ -3731,7 +3943,11 @@ function startUlisesApp() {
     _syncModelPickerAutohide();
     messageInput.addEventListener('input', () => {
       _syncModelPickerAutohide();
-      _debouncedUpdateIcon();
+      if (sendBtn && sendBtn.dataset.mode === 'streaming') {
+        _updateSendBtnIcon();
+      } else {
+        _debouncedUpdateIcon();
+      }
     }, { passive: true });
   }
 
@@ -3926,7 +4142,8 @@ function startUlisesApp() {
   }
 
   // Non-critical: load in parallel, resolve silently
-  modelsModule.refreshModels(true).then(() => {
+  modelsModule.refreshModels(false).then(() => {
+    try { sessionModule.updateModelPicker(); } catch (_) {}
     const modelsBox = document.getElementById('models');
     const hasModels = modelsBox && modelsBox.querySelector('.models-row');
     if (!hasModels) {
@@ -4075,6 +4292,15 @@ function startUlisesApp() {
     });
   }
 }
+
+// ── Observer cleanup ──
+// Disconnect all tracked MutationObservers on page unload so they don't
+// keep references to removed DOM nodes. Observers are registered at creation
+// time via `(window.__appObservers ||= []).push(obs)`.
+window.addEventListener('beforeunload', () => {
+  const obs = window.__appObservers;
+  if (obs) for (let i = 0; i < obs.length; i++) obs[i].disconnect();
+});
 
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', startUlisesApp, { once: true });

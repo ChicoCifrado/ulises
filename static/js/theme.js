@@ -7,6 +7,7 @@ import { initColorPickers, attachColorPicker } from './colorPicker.js';
 import { hexToRgb } from './color/hex.js';
 import { makeWindowDraggable } from './windowDrag.js';
 import { snapModalToZone } from './tileManager.js';
+import { t } from './i18n.js';
 
 export const THEMES = {
   dark:       { bg:'#282c34', fg:'#9cdef2', panel:'#111111', border:'#355a66', red:'#6663F1' },
@@ -731,7 +732,7 @@ export function initThemeUI() {
         e.stopPropagation();
         const name = btn.dataset.delete;
         if (uiModule && uiModule.styledConfirm) {
-          if (!await uiModule.styledConfirm(`Delete theme "${name}"?`, { confirmText: 'Delete', danger: true })) return;
+          if (!await uiModule.styledConfirm(t('theme.delete_confirm', { name }), { confirmText: t('common.delete'), danger: true })) return;
         }
         deleteCustomTheme(name);
       });
@@ -879,10 +880,10 @@ export function initThemeUI() {
     const doSave = () => {
       saveError.style.display = 'none';
       const name = newNameInput.value.trim();
-      if (!name) { saveError.textContent = 'Enter a name.'; saveError.style.display = 'block'; return; }
+      if (!name) { saveError.textContent = t('theme.enter_name'); saveError.style.display = 'block'; return; }
       const slug = name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
-      if (!slug) { saveError.textContent = 'Invalid name.'; saveError.style.display = 'block'; return; }
-      if (THEMES[slug]) { saveError.textContent = 'Cannot overwrite a built-in theme.'; saveError.style.display = 'block'; return; }
+      if (!slug) { saveError.textContent = t('theme.invalid_name'); saveError.style.display = 'block'; return; }
+      if (THEMES[slug]) { saveError.textContent = t('theme.cannot_overwrite'); saveError.style.display = 'block'; return; }
       const colors = {};
       const pickerIds2 = { bg: 'clr-bg', fg: 'clr-fg', panel: 'clr-panel', border: 'clr-border', red: 'clr-red' };
       Object.entries(pickerIds2).forEach(([k, pid]) => { colors[k] = document.getElementById(pid).value; });
@@ -896,14 +897,14 @@ export function initThemeUI() {
       if (hasAdv) colors.advanced = adv;
       const opts = _getOpts();
       const result = saveCustomTheme(slug, colors, opts);
-      if (result === 'limit') { saveError.textContent = 'Max ' + MAX_CUSTOM_THEMES + ' custom themes. Delete one first.'; saveError.style.display = 'block'; return; }
+      if (result === 'limit') { saveError.textContent = t('theme.max_themes', { n: MAX_CUSTOM_THEMES }); saveError.style.display = 'block'; return; }
       save(slug, colors, opts);
       newNameInput.value = '';
-      _flashAutosaved('Theme saved');
-      uiModule.showToast?.('Theme saved');
+      _flashAutosaved(t('theme.theme_saved'));
+      uiModule.showToast?.(t('theme.theme_saved'));
       const prevHtml = newGoBtn.innerHTML;
       newGoBtn.disabled = true;
-      newGoBtn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg><span>Saved</span>';
+      newGoBtn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg><span>' + t('theme.saved') + '</span>';
       setTimeout(() => {
         newGoBtn.disabled = false;
         newGoBtn.innerHTML = prevHtml;
@@ -1260,11 +1261,11 @@ export function initThemeUI() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = 'ulises_' + (obj.name || 'theme') + '.json';
+      a.download = 'ulises_' + (obj.name || t('theme.theme')) + '.json';
       a.click();
       URL.revokeObjectURL(url);
-      newExp.innerHTML = '&#x2713; Downloaded!';
-      setTimeout(() => { newExp.innerHTML = '&#x2913; Export'; }, 1500);
+      newExp.innerHTML = '&#x2713; ' + t('theme.downloaded') + '!';
+      setTimeout(() => { newExp.innerHTML = '&#x2913; ' + t('theme.export'); }, 1500);
     });
   }
 
@@ -1286,15 +1287,15 @@ export function initThemeUI() {
       saveError.style.display = 'none';
       let parsed;
       try { parsed = JSON.parse(importAreaEl.value.trim()); }
-      catch { saveError.textContent = 'Invalid JSON.'; saveError.style.display = 'block'; return; }
+      catch {       saveError.textContent = t('theme.invalid_json'); saveError.style.display = 'block'; return; }
       let colors = parsed.colors || parsed;
       const name = parsed.name || 'imported';
       const required = ['bg', 'fg', 'panel', 'border', 'red'];
       const missing = required.filter(k => !colors[k]);
-      if (missing.length) { saveError.textContent = 'Missing: ' + missing.join(', '); saveError.style.display = 'block'; return; }
+      if (missing.length) { saveError.textContent = t('theme.missing_keys', { keys: missing.join(', ') }); saveError.style.display = 'block'; return; }
       const hexRe = /^#[0-9a-fA-F]{6}$/;
       for (const k of required) {
-        if (!hexRe.test(colors[k])) { saveError.textContent = 'Bad hex for ' + k; saveError.style.display = 'block'; return; }
+        if (!hexRe.test(colors[k])) { saveError.textContent = t('theme.bad_hex', { key: k }); saveError.style.display = 'block'; return; }
       }
       const colorData = { bg: colors.bg, fg: colors.fg, panel: colors.panel, border: colors.border, red: colors.red };
       if (colors.advanced && typeof colors.advanced === 'object') colorData.advanced = colors.advanced;
@@ -1305,7 +1306,7 @@ export function initThemeUI() {
       if (parsed.bgPattern) opts.bgPattern = parsed.bgPattern;
       if (parsed.bgEffectColor) opts.bgEffectColor = parsed.bgEffectColor;
       const result = saveCustomTheme(slug, colorData, opts);
-      if (result === 'limit') { saveError.textContent = 'Max ' + MAX_CUSTOM_THEMES + ' custom themes. Delete one first.'; saveError.style.display = 'block'; return; }
+      if (result === 'limit') { saveError.textContent = t('theme.max_themes', { n: MAX_CUSTOM_THEMES }); saveError.style.display = 'block'; return; }
       save(slug, colorData, opts);
       applyColors(colorData);
       applyFontDensity(opts.font || DEFAULT_FONT, opts.density || DEFAULT_DENSITY);
@@ -1385,7 +1386,7 @@ function _clearThemeZoneHighlight() {
 }
 
 let _flashTimer = null;
-function _flashAutosaved(label = 'Auto-saved') {
+function _flashAutosaved(label = t('theme.auto_saved')) {
   let pill = document.getElementById('theme-autosaved-pill');
   if (!pill) {
     pill = document.createElement('div');

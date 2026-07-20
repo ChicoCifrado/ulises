@@ -15,6 +15,7 @@ import time
 from pathlib import Path
 from typing import Optional, Dict
 
+from core.async_utils import safe_create_task
 from src.research_utils import strip_thinking, is_low_quality
 from src.constants import DEEP_RESEARCH_DIR
 
@@ -400,7 +401,7 @@ class ResearchHandler:
                     entry["result"] = str(e)
                     entry["status"] = "error"
 
-        task = asyncio.create_task(_run())
+        task = safe_create_task(_run(), name=f"research-{session_id}")
         entry["task"] = task
         return {"session_id": session_id, "status": "running", "query": query}
 

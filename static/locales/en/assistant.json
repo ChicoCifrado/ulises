@@ -1,0 +1,12 @@
+{
+  "assistant": {
+    "unavailable": "Assistant session unavailable",
+    "could_not_open": "Could not open assistant",
+    "checkin_running": "Check-in running...",
+    "checkin_failed": "Could not run check-in",
+    "saved": "Assistant settings saved",
+    "save_failed": "Save failed",
+    "not_found": "Assistant not found",
+    "not_available": "Assistant not available"
+  }
+}

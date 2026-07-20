@@ -15,10 +15,12 @@ from typing import Any
 from fastapi import APIRouter, BackgroundTasks, Body, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
+from core.middleware import require_admin
 from src.auth_helpers import require_authenticated_request, require_user
 from src.tool_implementations import do_manage_notes
 from src.constants import COOKBOOK_STATE_FILE
 from routes._validators import validate_remote_host, validate_ssh_port
+from core.translations import t
 
 
 COOKBOOK_READ_SCOPES = {"cookbook:read", "cookbook:launch"}
@@ -87,10 +89,10 @@ def _scope_owner(request: Request, allowed: set[str]) -> str:
         scopes = set(getattr(request.state, "api_token_scopes", []) or [])
         if not scopes.intersection(allowed):
             required = " or ".join(sorted(allowed))
-            raise HTTPException(403, f"API token missing required scope: {required}")
+            raise HTTPException(403, t("codex.missing_scope").format(scope=required))
         owner = getattr(request.state, "api_token_owner", None)
         if not owner:
-            raise HTTPException(403, "API token has no owner")
+            raise HTTPException(403, t("codex.token_no_owner"))
         return owner
     return require_user(request)
 
@@ -101,12 +103,26 @@ def _scope_owner_all(request: Request, required: set[str]) -> str:
         scopes = set(getattr(request.state, "api_token_scopes", []) or [])
         missing = required - scopes
         if missing:
-            raise HTTPException(403, f"API token missing required scope: {' and '.join(sorted(missing))}")
+            raise HTTPException(403, t("codex.missing_scopes").format(scopes=' and '.join(sorted(missing))))
         owner = getattr(request.state, "api_token_owner", None)
         if not owner:
-            raise HTTPException(403, "API token has no owner")
+            raise HTTPException(403, t("codex.token_no_owner"))
         return owner
     return require_user(request)
+
+
+def _require_cookbook_scope(request: Request, allowed: set[str]) -> str:
+    """Authorize a Codex cookbook route.
+
+    For API-token callers, enforce the given scope set.
+    For cookie-session callers, additionally require admin privileges
+    because cookbook surfaces expose host topology, task logs, tmux
+    commands, and model-serving controls.
+    """
+    owner = _scope_owner(request, allowed)
+    if not getattr(request.state, "api_token", False):
+        require_admin(request)
+    return owner
 
 
 def _find_endpoint(router: APIRouter | None, method: str, path: str):
@@ -193,7 +209,7 @@ def setup_codex_routes(
         require_authenticated_request(request)
         root = Path(__file__).resolve().parent.parent / "integrations" / "codex"
         if not root.exists():
-            raise HTTPException(404, "Codex plugin bundle not found")
+            raise HTTPException(404, t("codex.plugin_bundle_not_found"))
         buf = BytesIO()
         with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
             for path in sorted(root.rglob("*")):
@@ -234,7 +250,7 @@ def setup_codex_routes(
     ):
         owner = _scope_owner(request, EMAIL_READ_SCOPES)
         if email_list_endpoint is None:
-            raise HTTPException(503, "Email integration is not available")
+            raise HTTPException(503, t("email.integration_unavailable"))
         limit = max(1, min(int(limit or 10), 50))
         offset = max(0, int(offset or 0))
         if account_id:
@@ -263,7 +279,7 @@ def setup_codex_routes(
     ):
         owner = _scope_owner(request, EMAIL_READ_SCOPES)
         if email_read_endpoint is None:
-            raise HTTPException(503, "Email integration is not available")
+            raise HTTPException(503, t("email.integration_unavailable"))
         if account_id:
             from routes.email_helpers import _assert_owns_account
 
@@ -313,9 +329,9 @@ def setup_codex_routes(
         owner = _scope_owner(request, EMAIL_DRAFT_SCOPES)
         docs_owner = _scope_owner_all(request, DOCS_WRITE_SCOPES)
         if docs_owner != owner:
-            raise HTTPException(403, "API token owner mismatch")
+            raise HTTPException(403, t("codex.token_owner_mismatch"))
         if documents_create_endpoint is None:
-            raise HTTPException(503, "Documents integration is not available")
+            raise HTTPException(503, t("document.integration_unavailable"))
         from routes.document_routes import DocumentCreate
 
         subject = str(body.get("subject") or "Email draft").strip() or "Email draft"
@@ -337,26 +353,26 @@ def setup_codex_routes(
     async def codex_email_draft(request: Request, body: dict[str, Any] = Body(default_factory=dict)):
         owner = _scope_owner(request, EMAIL_DRAFT_SCOPES)
         if email_draft_endpoint is None:
-            raise HTTPException(503, "Email integration is not available")
+            raise HTTPException(503, t("email.integration_unavailable"))
         from routes.email_routes import SendEmailRequest
 
         try:
             req = SendEmailRequest(**body)
         except Exception as exc:
-            raise HTTPException(400, f"Invalid draft payload: {exc}")
+            raise HTTPException(400, t("email.invalid_draft_payload").format(error=str(exc)))
         return await email_draft_endpoint(req=req, owner=owner)
 
     @router.post("/emails/send")
     async def codex_email_send(request: Request, body: dict[str, Any] = Body(default_factory=dict)):
         owner = _scope_owner(request, EMAIL_SEND_SCOPES)
         if email_send_endpoint is None:
-            raise HTTPException(503, "Email integration is not available")
+            raise HTTPException(503, t("email.integration_unavailable"))
         from routes.email_routes import SendEmailRequest
 
         try:
             req = SendEmailRequest(**body)
         except Exception as exc:
-            raise HTTPException(400, f"Invalid send payload: {exc}")
+            raise HTTPException(400, t("email.invalid_send_payload").format(error=str(exc)))
         return await email_send_endpoint(req=req, background_tasks=BackgroundTasks(), owner=owner)
 
     # ── Memory ────────────────────────────────────────────────────────────
@@ -365,14 +381,14 @@ def setup_codex_routes(
     async def codex_memory_list(request: Request):
         owner = _scope_owner(request, MEMORY_READ_SCOPES)
         if memory_list_endpoint is None:
-            raise HTTPException(503, "Memory integration is not available")
+            raise HTTPException(503, t("memory.integration_unavailable"))
         return await _as_owner(request, owner, memory_list_endpoint, request)
 
     @router.post("/memory")
     async def codex_memory_add(request: Request, body: dict[str, Any] = Body(default_factory=dict)):
         owner = _scope_owner(request, MEMORY_WRITE_SCOPES)
         if memory_add_endpoint is None:
-            raise HTTPException(503, "Memory integration is not available")
+            raise HTTPException(503, t("memory.integration_unavailable"))
         from src.request_models import MemoryAddRequest
 
         try:
@@ -383,9 +399,9 @@ def setup_codex_routes(
                 session_id=body.get("session_id"),
             )
         except Exception as exc:
-            raise HTTPException(400, f"Invalid memory payload: {exc}")
+            raise HTTPException(400, t("memory.invalid_payload").format(error=str(exc)))
         if not memory_data.text:
-            raise HTTPException(400, "Empty memory text")
+            raise HTTPException(400, t("memory.empty_text"))
         return await _as_owner(request, owner, memory_add_endpoint, request, memory_data)
 
     # ── Calendar ──────────────────────────────────────────────────────────
@@ -394,20 +410,20 @@ def setup_codex_routes(
     async def codex_calendar_list(request: Request, start: str, end: str, calendar: str = ""):
         owner = _scope_owner(request, CALENDAR_READ_SCOPES)
         if calendar_list_events is None:
-            raise HTTPException(503, "Calendar integration is not available")
+            raise HTTPException(503, t("calendar.integration_unavailable"))
         return await _as_owner(request, owner, calendar_list_events, request, start, end, calendar)
 
     @router.post("/calendar/events")
     async def codex_calendar_create(request: Request, body: dict[str, Any] = Body(default_factory=dict)):
         owner = _scope_owner(request, CALENDAR_WRITE_SCOPES)
         if calendar_create_event is None:
-            raise HTTPException(503, "Calendar integration is not available")
+            raise HTTPException(503, t("calendar.integration_unavailable"))
         from routes.calendar_routes import EventCreate
 
         try:
             data = EventCreate(**body)
         except Exception as exc:
-            raise HTTPException(400, f"Invalid event payload: {exc}")
+            raise HTTPException(400, t("calendar.invalid_payload").format(error=str(exc)))
         return await _as_owner(request, owner, calendar_create_event, request, data)
 
     # ── Documents ─────────────────────────────────────────────────────────
@@ -424,7 +440,7 @@ def setup_codex_routes(
     ):
         owner = _scope_owner(request, DOCS_READ_SCOPES)
         if documents_library_endpoint is None:
-            raise HTTPException(503, "Documents integration is not available")
+            raise HTTPException(503, t("document.integration_unavailable"))
         return await _as_owner(
             request, owner, documents_library_endpoint,
             request, search, language, sort, offset, limit, archived,
@@ -434,7 +450,7 @@ def setup_codex_routes(
     async def codex_documents_get(request: Request, doc_id: str):
         owner = _scope_owner(request, DOCS_READ_SCOPES)
         if documents_get_endpoint is None:
-            raise HTTPException(503, "Documents integration is not available")
+            raise HTTPException(503, t("document.integration_unavailable"))
         return await _as_owner(request, owner, documents_get_endpoint, request, doc_id)
 
     # ── DELETE endpoints so agents can clean up after themselves ──────────
@@ -447,34 +463,34 @@ def setup_codex_routes(
     async def codex_memory_delete(request: Request, memory_id: str):
         owner = _scope_owner(request, MEMORY_WRITE_SCOPES)
         if memory_delete_endpoint is None:
-            raise HTTPException(503, "Memory delete not available")
+            raise HTTPException(503, t("memory.delete_unavailable"))
         return await _as_owner(request, owner, memory_delete_endpoint, request, memory_id)
 
     @router.delete("/calendar/events/{uid}")
     async def codex_calendar_delete(request: Request, uid: str):
         owner = _scope_owner(request, CALENDAR_WRITE_SCOPES)
         if calendar_delete_event is None:
-            raise HTTPException(503, "Calendar delete not available")
+            raise HTTPException(503, t("calendar.delete_unavailable"))
         return await _as_owner(request, owner, calendar_delete_event, request, uid)
 
     @router.delete("/documents/{doc_id}")
     async def codex_documents_delete(request: Request, doc_id: str):
         owner = _scope_owner(request, DOCS_WRITE_SCOPES)
         if documents_delete_endpoint is None:
-            raise HTTPException(503, "Documents delete not available")
+            raise HTTPException(503, t("document.delete_unavailable"))
         return await _as_owner(request, owner, documents_delete_endpoint, request, doc_id)
 
     @router.post("/documents")
     async def codex_documents_create(request: Request, body: dict[str, Any] = Body(default_factory=dict)):
         owner = _scope_owner(request, DOCS_WRITE_SCOPES)
         if documents_create_endpoint is None:
-            raise HTTPException(503, "Documents integration is not available")
+            raise HTTPException(503, t("document.integration_unavailable"))
         from routes.document_routes import DocumentCreate
 
         try:
             req = DocumentCreate(**body)
         except Exception as exc:
-            raise HTTPException(400, f"Invalid document payload: {exc}")
+            raise HTTPException(400, t("document.invalid_payload").format(error=str(exc)))
         return await _as_owner(request, owner, documents_create_endpoint, request, req)
 
     # ── Cookbook surface ──
@@ -532,14 +548,14 @@ def setup_codex_routes(
 
     @router.get("/cookbook/tasks")
     async def codex_cookbook_tasks(request: Request):
-        _scope_owner(request, COOKBOOK_READ_SCOPES)
+        _require_cookbook_scope(request, COOKBOOK_READ_SCOPES)
         state = _read_cookbook_state()
         tasks = state.get("tasks") or []
         return {"tasks": [_redact_task(t) for t in tasks]}
 
     @router.get("/cookbook/servers")
     async def codex_cookbook_servers(request: Request):
-        _scope_owner(request, COOKBOOK_READ_SCOPES)
+        _require_cookbook_scope(request, COOKBOOK_READ_SCOPES)
         state = _read_cookbook_state()
         servers = state.get("env", {}).get("servers") or []
         # Strip ssh creds / passwords; keep only what's needed to pick a host.
@@ -558,13 +574,13 @@ def setup_codex_routes(
 
     @router.get("/cookbook/output/{session_id}")
     async def codex_cookbook_output(request: Request, session_id: str, tail: int = 400):
-        _scope_owner(request, COOKBOOK_READ_SCOPES)
+        _require_cookbook_scope(request, COOKBOOK_READ_SCOPES)
         # Defensive: session_id must be the tmux-style id we issue
         # (`serve-XXXX` / `cookbook-XXXX` / `queue-XXXX`); anything else
         # would let the agent run arbitrary `tmux capture-pane` targets.
         import re as _re
         if not _re.fullmatch(r"[a-zA-Z0-9_-]+", session_id):
-            raise HTTPException(400, "Invalid session id")
+            raise HTTPException(400, t("cookbook.invalid_session_id"))
         tail = max(20, min(int(tail or 400), 4000))
         # Resolve the task's host (if any) from cookbook state so we can
         # ssh to the right box, exactly as the UI does in _reconnectTask.
@@ -572,7 +588,7 @@ def setup_codex_routes(
         tasks = state.get("tasks") or []
         task = next((t for t in tasks if t.get("sessionId") == session_id), None)
         if task is None:
-            raise HTTPException(404, "task not found")
+            raise HTTPException(404, t("cookbook.task_not_found"))
         host, port_flag = _ssh_prefix_for_task(task)
         # Prefer the persisted log file over the tmux pane. The pane gets
         # overwritten by the post-crash neofetch banner + bash prompt the
@@ -600,7 +616,7 @@ def setup_codex_routes(
 
     @router.post("/cookbook/serve")
     async def codex_cookbook_serve(request: Request, body: dict[str, Any] = Body(default_factory=dict)):
-        _scope_owner(request, COOKBOOK_LAUNCH_SCOPES)
+        _require_cookbook_scope(request, COOKBOOK_LAUNCH_SCOPES)
         # Wraps /api/model/serve with the SAME validation the UI uses.
         # _validate_serve_cmd (called inside model_serve) rejects shell
         # metachars and requires the leading binary to be in the
@@ -623,7 +639,7 @@ def setup_codex_routes(
         try:
             req = ServeRequest(**norm)
         except Exception as exc:
-            raise HTTPException(400, f"Invalid serve payload: {exc}")
+            raise HTTPException(400, t("cookbook.invalid_serve_payload").format(error=str(exc)))
         serve_endpoint = _find_endpoint(None, "POST", "/api/model/serve")
         # Fall back to importing from the cookbook router registered on app.
         if serve_endpoint is None:
@@ -634,15 +650,15 @@ def setup_codex_routes(
                     serve_endpoint = route.endpoint
                     break
         if serve_endpoint is None:
-            raise HTTPException(503, "model serve endpoint unavailable")
+            raise HTTPException(503, t("cookbook.serve_endpoint_unavailable"))
         return await serve_endpoint(request, req)
 
     @router.post("/cookbook/stop/{session_id}")
     async def codex_cookbook_stop(request: Request, session_id: str):
-        _scope_owner(request, COOKBOOK_LAUNCH_SCOPES)
+        _require_cookbook_scope(request, COOKBOOK_LAUNCH_SCOPES)
         import re as _re
         if not _re.fullmatch(r"[a-zA-Z0-9_-]+", session_id):
-            raise HTTPException(400, "Invalid session id")
+            raise HTTPException(400, t("cookbook.invalid_session_id"))
         state = _read_cookbook_state()
         tasks = state.get("tasks") or []
         task = next((t for t in tasks if t.get("sessionId") == session_id), None)
@@ -659,7 +675,7 @@ def setup_codex_routes(
         """List cached models on a configured server (or local if host is omitted).
         Mirrors `list_cached_models` from the chat agent so external agents have
         the same inventory view before deciding what to serve/download."""
-        _scope_owner(request, COOKBOOK_READ_SCOPES)
+        _require_cookbook_scope(request, COOKBOOK_READ_SCOPES)
         # Hit /api/model/cached internally, with the same modelDirs the chat
         # agent's list_cached_models would resolve from cookbook state.
         state = _read_cookbook_state()
@@ -706,7 +722,7 @@ def setup_codex_routes(
                     cached_endpoint = route.endpoint
                     break
         if cached_endpoint is None:
-            raise HTTPException(503, "model cached endpoint unavailable")
+            raise HTTPException(503, t("cookbook.cached_endpoint_unavailable"))
         # The endpoint reads host/model_dir/ssh_port/platform as kwargs.
         return await cached_endpoint(
             request,
@@ -721,7 +737,7 @@ def setup_codex_routes(
         """List saved serve presets (model + host + port + launch cmd).
         Counterpart to `list_serve_presets`. Use BEFORE composing a `serve`
         body — the user's saved preset usually has the working cmd already."""
-        _scope_owner(request, COOKBOOK_READ_SCOPES)
+        _require_cookbook_scope(request, COOKBOOK_READ_SCOPES)
         state = _read_cookbook_state()
         presets = state.get("presets") or []
         out = []
@@ -741,10 +757,10 @@ def setup_codex_routes(
     async def codex_cookbook_serve_preset(request: Request, name: str):
         """Launch a saved preset by name. Reuses the working cmd + host the
         user already saved, avoiding the cmd-allowlist trial-and-error loop."""
-        _scope_owner(request, COOKBOOK_LAUNCH_SCOPES)
+        _require_cookbook_scope(request, COOKBOOK_LAUNCH_SCOPES)
         import re as _re
         if not _re.fullmatch(r"[A-Za-z0-9 _.:@\-]+", name):
-            raise HTTPException(400, "Invalid preset name")
+            raise HTTPException(400, t("cookbook.invalid_preset_name"))
         state = _read_cookbook_state()
         presets = state.get("presets") or []
         lname = name.lower().strip()
@@ -758,14 +774,12 @@ def setup_codex_routes(
                 None,
             )
         if chosen is None:
-            raise HTTPException(404, f"No preset matching {name!r}")
+            raise HTTPException(404, t("cookbook.preset_not_found").format(name=name))
         repo_id = chosen.get("model") or chosen.get("modelId") or ""
         cmd = (chosen.get("cmd") or "").strip()
         host = chosen.get("host") or chosen.get("remoteHost") or ""
         if not repo_id or not cmd or cmd.startswith("(adopted"):
-            raise HTTPException(400, f"Preset {chosen.get('name')!r} has no launchable cmd "
-                                     "(adopted from external launch). Use POST /cookbook/serve "
-                                     "with the actual cmd instead.")
+            raise HTTPException(400, t("cookbook.preset_no_launchable_cmd").format(name=chosen.get('name')))
         # Reuse the serve handler we already validated.
         from routes.cookbook_helpers import ServeRequest
         body = {"repo_id": repo_id, "cmd": cmd}
@@ -774,7 +788,7 @@ def setup_codex_routes(
         try:
             req = ServeRequest(**body)
         except Exception as exc:
-            raise HTTPException(400, f"Preset payload invalid: {exc}")
+            raise HTTPException(400, t("cookbook.invalid_preset_payload").format(error=str(exc)))
         serve_endpoint = _find_endpoint(None, "POST", "/api/model/serve")
         if serve_endpoint is None:
             from fastapi import FastAPI
@@ -784,7 +798,7 @@ def setup_codex_routes(
                     serve_endpoint = route.endpoint
                     break
         if serve_endpoint is None:
-            raise HTTPException(503, "model serve endpoint unavailable")
+            raise HTTPException(503, t("cookbook.serve_endpoint_unavailable"))
         return await serve_endpoint(request, req)
 
     @router.post("/cookbook/adopt")
@@ -793,7 +807,7 @@ def setup_codex_routes(
         cookbook tracking. Needed when serve_model rejects a cmd and the
         agent falls back to direct ssh — without adoption the session is
         invisible to the UI. Body: {tmux_session, model, host?, port?}."""
-        _scope_owner(request, COOKBOOK_LAUNCH_SCOPES)
+        _require_cookbook_scope(request, COOKBOOK_LAUNCH_SCOPES)
         norm = dict(body or {})
         sess = (norm.get("tmux_session") or norm.get("session_id") or "").strip()
         model = (norm.get("model") or norm.get("repo_id") or "").strip()
@@ -801,9 +815,9 @@ def setup_codex_routes(
         port = norm.get("port") or 8000
         import re as _re
         if not sess or not _re.fullmatch(r"[a-zA-Z0-9_-]+", sess):
-            raise HTTPException(400, "tmux_session required, [a-zA-Z0-9_-]+ only")
+            raise HTTPException(400, t("cookbook.invalid_tmux_session"))
         if not model:
-            raise HTTPException(400, "model required")
+            raise HTTPException(400, t("cookbook.model_required"))
         # Verify the tmux session exists on the target host before adopting.
         import shlex
         if host:
@@ -812,7 +826,7 @@ def setup_codex_routes(
             check = f"tmux has-session -t {shlex.quote(sess)}"
         chk = await _run_shell(check, timeout=8)
         if chk.get("exit_code") not in (0, None):
-            raise HTTPException(404, f"tmux session {sess!r} not found on {host or 'local'}")
+            raise HTTPException(404, t("cookbook.tmux_session_not_found").format(session=sess, host=host or 'local'))
         # Write into cookbook_state.json.
         import time as _t, json as _json
         from core.atomic_io import atomic_write_json
@@ -838,7 +852,7 @@ def setup_codex_routes(
         try:
             atomic_write_json(cookbook_state_path, state)
         except Exception as exc:
-            raise HTTPException(500, f"state write failed: {exc}")
+            raise HTTPException(500, t("cookbook.state_write_failed").format(error=str(exc)))
         return {"ok": True, "session_id": sess, "host": host or "local"}
 
     return router
@@ -860,7 +874,7 @@ def setup_claude_routes() -> APIRouter:
         # README.md or other bundle metadata into the user's claude config dir.
         skills_root = Path(__file__).resolve().parent.parent / "integrations" / "claude" / "skills"
         if not skills_root.exists():
-            raise HTTPException(404, "Claude skill bundle not found")
+            raise HTTPException(404, t("claude.skill_bundle_not_found"))
         bundle_root = skills_root.parent
         buf = BytesIO()
         with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:

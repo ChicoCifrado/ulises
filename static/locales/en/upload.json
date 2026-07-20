@@ -1,0 +1,8 @@
+{
+  "upload": {
+    "handler_failed": "Upload handler not configured",
+    "save_failed": "Failed to save file: {{error}}",
+    "access_denied": "Access denied",
+    "not_found": "File not found"
+  }
+}

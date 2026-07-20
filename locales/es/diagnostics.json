@@ -1,0 +1,8 @@
+{
+  "diagnostics": {
+    "logs_failed": "Error al obtener los registros: {error}",
+    "db_stats_failed": "Error al obtener las estadísticas de la base de datos",
+    "rag_unavailable": "Sistema RAG no disponible",
+    "invalid_youtube_url": "URL de YouTube inválida"
+  }
+}

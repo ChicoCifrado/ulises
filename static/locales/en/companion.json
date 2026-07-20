@@ -1,0 +1,15 @@
+{
+  "companion": {
+    "pair_title": "Pair a device",
+    "pair_desc": "Generate a one-time pairing code (a chat-scoped API token) for a LAN client.",
+    "generate_code": "Generate pairing code",
+    "admin_note": "Admin only. Each code mints a new token, shown once. Manage or revoke under Settings → API tokens.",
+    "pairing_code": "Pairing code",
+    "host": "Host:",
+    "port": "Port:",
+    "token": "Token:",
+    "payload": "Payload:",
+    "shown_once": "Shown once. This grants chat access to your Ulises; revoke it in Settings → API tokens (id ...). The device must be on the same network, and the server must bind to your LAN.",
+    "qr_unavailable": "QR rendering unavailable -- enter the details manually."
+  }
+}

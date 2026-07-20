@@ -16,6 +16,18 @@ services:
       # land under /app/.local for the ulises user. Persist them so a
       # container recreate does not silently remove installed serve engines.
       - ${APP_DATA_DIR:-./data}/local:/app/.local:z
+      # ── SECURITY WARNING ──
+      # Mounting the Docker socket gives the container root-equivalent
+      # access to the host Docker daemon. This allows code running inside
+      # the container to start / stop / exec into any container on the
+      # host (including sibling Ollama instances). Only enable this if
+      # you trust every process inside the container (agent code, MCP
+      # tools, browser-automation steps) as much as a root-on-host user.
+      # To disable, comment out the socket mount and the group_add / GID
+      # line below — Cookbook's docker-exec helpers will fail gracefully
+      # with "Docker not available".
+      # https://docs.docker.com/engine/security/#docker-daemon-attack-surface
+      # ─────────────────────
       # Docker socket — lets Cookbook launch commands like
       # `docker exec ollama-rocm ollama show <tag>` reach the host's
       # Docker daemon (and sibling containers like ollama-rocm /
@@ -37,7 +49,6 @@ services:
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-}
       - RESEARCH_LLM_ENDPOINT=${RESEARCH_LLM_ENDPOINT:-}
       - HF_TOKEN=${HF_TOKEN:-}
-      - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN:-}
       - SEARXNG_INSTANCE=http://searxng:8080
       - CHROMADB_HOST=chromadb
       - CHROMADB_PORT=8000

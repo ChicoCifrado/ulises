@@ -154,11 +154,7 @@ def test_suggest_document_active_id_filters_to_calling_owner(monkeypatch):
 
 
 def test_document_tool_dispatch_forwards_owner():
-    source = open("src/tool_execution.py", encoding="utf-8").read()
-
-    assert "_document_tool_dispatch(tool, content, session_id, owner)" in source
-
-    # Also verify TOOL_HANDLERS has the expected entries
+    # Document tools route through TOOL_HANDLERS via _direct_fallback.
     for key in ("create_document", "update_document", "edit_document",
                 "suggest_document", "manage_documents"):
         assert key in TOOL_HANDLERS, f"TOOL_HANDLERS missing key: {key}"

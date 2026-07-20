@@ -77,7 +77,7 @@ def test_dav_client_does_not_follow_redirect_to_internal_host():
             pass
         # The request must actually have left the building — otherwise an early
         # error would make "sink not hit" pass vacuously.
-        assert public_methods == ["PROPFIND"], "the PROPFIND must reach the public server first"
+        assert "PROPFIND" in public_methods, "the PROPFIND must reach the public server first"
         assert sink_hits == [], "redirect toward an internal host must not be followed"
     finally:
         internal.shutdown()

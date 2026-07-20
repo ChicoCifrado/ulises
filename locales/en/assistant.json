@@ -1,0 +1,11 @@
+{
+  "assistant": {
+    "not_authenticated": "Not authenticated",
+    "cannot_seed": "Cannot seed assistant for {owner}",
+    "could_not_resolve": "Assistant session could not be resolved",
+    "not_available": "Assistant not available",
+    "not_found": "Assistant not found",
+    "task_not_found": "Task not found",
+    "not_assistant_task": "Not an assistant task"
+  }
+}

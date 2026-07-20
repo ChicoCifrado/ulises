@@ -3,6 +3,7 @@
 // What Fits? + Saved presets, inline action panels
 // ============================================
 
+import { t } from './i18n.js';
 import uiModule from './ui.js';
 import spinnerModule from './spinner.js';
 import { providerLogo } from './providers.js';
@@ -73,7 +74,7 @@ function _platformIcon(platform) {
   return '';
 }
 
-export let _envState = { env: 'none', envPath: '', hfToken: '', hfTokenConfigured: false, hfTokenMasked: '', gpus: '', remoteHost: '', servers: [], modelPaths: [], platform: '', defaultServer: '' };
+export let _envState = { env: 'none', envPath: '', hfToken: '', hfTokenConfigured: false, hfTokenMasked: '', gpus: '', remoteHost: '', servers: [], modelPaths: [], platform: '', hostPlatform: '', defaultServer: '' };
 let _lastCacheHostVal = null;
 let _cookbookOpeningSpinners = [];
 export function _lastCacheHost() { return _lastCacheHostVal; }
@@ -210,8 +211,13 @@ function _getPort(hostOrTask) {
 
 /** Get platform for a given host (or task object). Returns 'windows', 'termux', 'linux', or '' */
 export function _getPlatform(hostOrTask) {
-  if (!hostOrTask) return _envState.platform || '';
-  if (typeof hostOrTask === 'object') return hostOrTask.platform || _getPlatform(hostOrTask.remoteServerKey || hostOrTask.remoteHost);
+  if (hostOrTask === 'local') return _envState.hostPlatform || '';
+  if (!hostOrTask) return _envState.remoteHost ? (_envState.platform || '') : (_envState.hostPlatform || '');
+  if (typeof hostOrTask === 'object') {
+    const taskHost = hostOrTask.remoteServerKey || hostOrTask.remoteHost || '';
+    if (!taskHost || taskHost === 'local') return _envState.hostPlatform || '';
+    return hostOrTask.platform || _getPlatform(taskHost);
+  }
   const selected = hostOrTask === _envState.remoteHost ? _selectedServer() : null;
   const srv = selected || _serverByVal(hostOrTask);
   return srv?.platform || '';
@@ -635,7 +641,12 @@ export function _buildServeCmd(f, modelName, backend) {
     // GPU list — read from gpus (button strip); fall back to gpu_id for
     // backward-compat with older saved presets that pre-date the removal.
     const gpuId = (f.gpus || f.gpu_id || '').toString().trim();
-    const py = _isWindows() ? 'python' : 'python3';
+    const _targetHost = Object.prototype.hasOwnProperty.call(f, 'host')
+      ? String(f.host || '').trim()
+      : String(_envState.remoteHost || '').trim();
+    const _isWin = _targetHost ? _isWindows(_targetHost) : _isWindows('local');
+    const _localWindows = _isWin && !_targetHost;
+    const py = _isWin ? 'python' : 'python3';
     // CPU-only serve (-ngl 0): drop the GPU-only flags, otherwise the command
     // mixes "zero GPU layers" with CUDA unified-memory + flash-attn and fails to
     // start (issue #1291). Only affects the ngl=0 path; GPU serving is unchanged.
@@ -657,19 +668,19 @@ export function _buildServeCmd(f, modelName, backend) {
     // with misleading prefixes.
     const _sb = String(_hwfitCache?.system?.backend || '').toLowerCase();
     const _hwfitHost = String(_hwfitCache?._scannedHost || '');
-    const _curHost = String(_envState.remoteHost || '');
+    const _curHost = _targetHost;
     const _isCudaTarget = (_sb === 'cuda') && (_hwfitHost === _curHost);
     const lcPrefix = (() => {
       let p = '';
-      if (f.unified_mem && !_cpuOnly && !_isWindows() && _isCudaTarget) p += `GGML_CUDA_ENABLE_UNIFIED_MEMORY=1 `;
-      // No GPU env var in CPU mode — `-ngl 0` already disables offload
+      if (f.unified_mem && !_cpuOnly && (!_isWin || _localWindows) && _isCudaTarget) p += `GGML_CUDA_ENABLE_UNIFIED_MEMORY=1 `;
+      // No GPU env var in CPU mode - `-ngl 0` already disables offload
       // so CUDA_VISIBLE_DEVICES / HIP_VISIBLE_DEVICES would be misleading
       // clutter ("why is CUDA pinned for a CPU run?").
-      if (!_isWindows() && !_cpuOnly) p += _gpuEnvPrefix(gpuId);
+      if ((!_isWin || _localWindows) && !_cpuOnly) p += _gpuEnvPrefix(gpuId);
       return p;
     })();
-    if (f.unified_mem && !_cpuOnly && _isWindows() && _isCudaTarget) cmd += `$env:GGML_CUDA_ENABLE_UNIFIED_MEMORY="1"; `;
-    if (_isWindows() && !_cpuOnly) cmd += _gpuEnvPrefix(gpuId, true);
+    if (f.unified_mem && !_cpuOnly && _isWin && !_localWindows && _isCudaTarget) cmd += `$env:GGML_CUDA_ENABLE_UNIFIED_MEMORY="1"; `;
+    if (_isWin && !_localWindows && !_cpuOnly) cmd += _gpuEnvPrefix(gpuId, true);
     const needsGgufPrelude = /^\$\(\{\s*find\s/.test(String(ggufPath || ''));
     const modelArg = needsGgufPrelude ? '"$MODEL_FILE"' : `"${ggufPath}"`;
     // Prefer native llama-server. The backend bootstrap resolves/builds the
@@ -741,11 +752,16 @@ export function _buildServeCmd(f, modelName, backend) {
       // llama-cpp-python takes the projector via --clip_model_path.
       _lcpExtra += ` --clip_model_path "${f._mmproj_path}"`;
     }
-    if (_isWindows()) {
-      const _lcpServer = `${lcPrefix}${py} -m llama_cpp.server --model ${modelArg} --host 0.0.0.0 --port ${f.port || '8080'} --n_gpu_layers ${f.ngl || '99'} --n_ctx ${f.ctx || '8192'}${_lcpExtra}`;
+    const _lcServer = `${lcPrefix}llama-server --model ${modelArg} --host 0.0.0.0 --port ${f.port || '8080'} -ngl ${f.ngl || '99'} -c ${f.ctx || '8192'}${_lcExtra}`;
+    const _lcpServer = `${lcPrefix}${py} -m llama_cpp.server --model ${modelArg} --host 0.0.0.0 --port ${f.port || '8080'} --n_gpu_layers ${f.ngl || '99'} --n_ctx ${f.ctx || '8192'}${_lcpExtra}`;
+    if (_localWindows) {
+      // Local Windows serve is launched through Git Bash, so use the native
+      // llama-server shape and let PATH resolve the CUDA Release wrapper.
+      cmd += _lcServer;
+    } else if (_isWin) {
       cmd += _lcpServer;
     } else {
-      cmd += `${lcPrefix}llama-server --model ${modelArg} --host 0.0.0.0 --port ${f.port || '8080'} -ngl ${f.ngl || '99'} -c ${f.ctx || '8192'}${_lcExtra}`;
+      cmd += _lcServer;
     }
     if (needsGgufPrelude) {
       cmd = `MODEL_FILE=${ggufPath} && { [ -n "$MODEL_FILE" ] && [ -f "$MODEL_FILE" ]; } || { echo "ERROR: No GGUF found on this host"; exit 1; } && ${cmd}`;
@@ -1168,7 +1184,7 @@ async function _fetchDependencies() {
           // disappearing before the user could read multi-clause errors
           // like "tmux missing on remote".
           const reason = data.detail || data.error || `HTTP ${res.status}`;
-          uiModule.showToast('Install failed: ' + String(reason).slice(0, 400), {
+          uiModule.showToast(t('cookbook.installFailed', { reason: String(reason).slice(0, 400) }), {
             duration: 20000,
             action: 'OK',
             onAction: () => {},
@@ -1180,9 +1196,9 @@ async function _fetchDependencies() {
         const payload = { repo_id: pipName, _cmd: cmd, remote_host: _envState.remoteHost || '', _dep: true, env_path: _envState.envPath || '' };
         _addTask(data.session_id, 'pip ' + pkgName, 'download', payload);
         if (statusEl) { statusEl.textContent = upgrade ? 'Updating...' : 'Installing...'; statusEl.disabled = true; }
-        uiModule.showToast(`${upgrade ? 'Updating' : 'Installing'} ${pkgName} on ${targetHost}...`);
+        uiModule.showToast(t(upgrade ? 'cookbook.updatingPkg' : 'cookbook.installingPkg', { pkg: pkgName, host: targetHost }));
       } catch (err) {
-        uiModule.showToast('Install failed: ' + err.message, {
+        uiModule.showToast(t('cookbook.installFailed', { reason: err.message }), {
           duration: 20000,
           action: 'OK',
           onAction: () => {},
@@ -1240,14 +1256,14 @@ async function _fetchDependencies() {
           if (res.ok && data.ok) {
             const payload = { repo_id: 'pip llama-cpp-python[CUDA]', _cmd: cmd, remote_host: _envState.remoteHost || '', _dep: true };
             _addTask(data.session_id, 'pip llama-cpp-python[CUDA]', 'download', payload);
-            uiModule.showToast(`Reinstalling llama-cpp-python with CUDA wheels on ${targetLabel} (~1-3 min)…`, 4000);
+            uiModule.showToast(t('cookbook.reinstallingCudaWheels', { target: targetLabel }), 4000);
           } else {
-            uiModule.showToast('Upgrade failed: ' + String(data.detail || data.error || `HTTP ${res.status}`).slice(0, 300), {
+            uiModule.showToast(t('cookbook.upgradeFailed', { reason: String(data.detail || data.error || `HTTP ${res.status}`).slice(0, 300) }), {
               duration: 20000, action: 'OK', onAction: () => {},
             });
           }
         } catch (err) {
-          uiModule.showToast('Upgrade request failed: ' + err.message, { duration: 20000, action: 'OK', onAction: () => {} });
+          uiModule.showToast(t('cookbook.upgradeRequestFailed', { reason: err.message }), { duration: 20000, action: 'OK', onAction: () => {} });
         }
       });
     });
@@ -1306,7 +1322,7 @@ async function _fetchDependencies() {
           });
           const data = await res.json().catch(() => ({}));
           if (res.ok && data.ok) {
-            uiModule.showToast(`Installed ${names.join(', ')} on ${targetLabel}. Refreshing…`, 4000);
+            uiModule.showToast(t('cookbook.installedDeps', { names: names.join(', '), target: targetLabel }), 4000);
             // Refresh the deps panel so the row updates (prereqs now present).
             try { await _fetchDependencies(); } catch {}
           } else {
@@ -1315,7 +1331,7 @@ async function _fetchDependencies() {
             // from the row) so the user can copy-paste it without leaving
             // the toast. Otherwise just surface the error.
             const _suffix = _resolvedCmd ? `\n\nRun on ${targetLabel}: ${_resolvedCmd}` : '';
-            uiModule.showToast('Build-deps install failed: ' + String(reason).slice(0, 300) + _suffix, {
+            uiModule.showToast(t('cookbook.buildDepsInstallFailed', { reason: String(reason).slice(0, 300), suffix: _suffix }), {
               duration: 25000,
               action: _resolvedCmd ? 'Copy command' : 'OK',
               onAction: async () => {
@@ -1328,9 +1344,9 @@ async function _fetchDependencies() {
             btn.disabled = false;
           }
         } catch (err) {
-          uiModule.showToast('Install request failed: ' + err.message, {
-            duration: 20000, action: 'OK', onAction: () => {},
-          });
+uiModule.showToast(t('cookbook.installRequestFailed', { reason: err.message }), {
+          duration: 20000, action: 'OK', onAction: () => {},
+        });
           btn.textContent = origText;
           btn.disabled = false;
         }
@@ -1402,7 +1418,7 @@ async function _fetchDependencies() {
         if (!pre) return;
         try {
           await navigator.clipboard.writeText(pre.textContent);
-          uiModule.showToast('Copied');
+          uiModule.showToast(t('common.copied'));
         } catch {
           // Fallback for non-secure contexts: select the pre's text so
           // the user can Ctrl+C themselves.
@@ -1453,14 +1469,14 @@ async function _fetchDependencies() {
           });
           const data = await res.json().catch(() => ({}));
           if (!res.ok || !data.ok) {
-            uiModule.showToast('Run failed: ' + String(data.detail || data.error || `HTTP ${res.status}`).slice(0, 200));
+            uiModule.showToast(t('cookbook.runFailed', { reason: String(data.detail || data.error || `HTTP ${res.status}`).slice(0, 200) }));
             return;
           }
           const payload = { repo_id: `${backend} setup`, _cmd: cmd, remote_host: _envState.remoteHost || '', _dep: true };
           _addTask(data.session_id, `${backend} setup`, 'download', payload);
-          uiModule.showToast(`Running ${backend} setup on ${targetHost}…`);
+          uiModule.showToast(t('cookbook.runningSetup', { backend, host: targetHost }));
         } catch (err) {
-          uiModule.showToast('Run failed: ' + err.message);
+          uiModule.showToast(t('cookbook.runFailed', { reason: err.message }));
         }
       });
     });
@@ -1495,14 +1511,14 @@ async function _fetchDependencies() {
         const data = await res.json().catch(() => ({}));
         if (!res.ok || !data.ok) {
           const reason = data.detail || data.error || `HTTP ${res.status}`;
-          uiModule.showToast(`${updateSource ? 'Update' : 'Rebuild'} failed: ` + String(reason).slice(0, 300), {
+          uiModule.showToast(t(updateSource ? 'cookbook.updateFailed' : 'cookbook.rebuildFailed', { reason: String(reason).slice(0, 300) }), {
             duration: 20000, action: 'OK', onAction: () => {},
           });
         } else {
-          uiModule.showToast(`${updateSource ? 'Updated source and cleared' : 'Cleared'} llama.cpp build on ${where}. Re-launch the serve task to rebuild.`);
+          uiModule.showToast(t(updateSource ? 'cookbook.updatedSourceAndCleared' : 'cookbook.clearedBuild', { where }));
         }
       } catch (err) {
-        uiModule.showToast(`${updateSource ? 'Update' : 'Rebuild'} failed: ` + err.message);
+        uiModule.showToast(t(updateSource ? 'cookbook.updateFailed' : 'cookbook.rebuildFailed', { reason: err.message }));
       } finally {
         if (statusEl) {
           statusEl.disabled = false;
@@ -2106,7 +2122,7 @@ function _wireTabEvents(body) {
       // Ollama names (single-segment with a tag) skip this check — they go
       // through `ollama pull` server-side, not snapshot_download.
       if (!ollamaName && !/^[^\s/]+\/[^\s/]+$/.test(repo)) {
-        uiModule.showToast('Enter a full HuggingFace repo ID like "org/model-name", or an Ollama name like "qwen2.5:14b".');
+        uiModule.showToast(t('cookbook.enterFullRepoId'));
         dlInput.focus();
         return;
       }
@@ -2123,10 +2139,10 @@ function _wireTabEvents(body) {
           dlBtn.textContent = oldText;
         }
         if (!pickerInclude) {
-          uiModule.showToast('Pick a GGUF quant first. Ulises will not download the whole GGUF repo without an include pattern.');
+          uiModule.showToast(t('cookbook.pickGgufQuantFirst'));
           return;
         }
-        uiModule.showToast('Pick the GGUF quant, then press Download again.');
+        uiModule.showToast(t('cookbook.pickGgufQuantThenDownload'));
         return;
       }
       // Resolve the host straight from THIS window's server dropdown, by index
@@ -2509,7 +2525,7 @@ function _wireTabEvents(body) {
 // (a new server's host is empty, which would otherwise read as "Local").
 export function _serverEntryHtml(s, i, defaultServer, forceRemote, isNew) {
   const isLocal = (forceRemote || isNew) ? false : (!s.host || s.host === 'local');
-  const envOpts = ['none', 'venv'].map(e => `<option value="${e}"${s.env === e ? ' selected' : ''}>${e === 'none' ? 'None' : e}</option>`).join('');
+  const envOpts = [['none', 'None'], ['venv', 'venv'], ['conda', 'conda']].map(([value, label]) => `<option value="${value}"${s.env === value ? ' selected' : ''}>${label}</option>`).join('');
   let html = '';
   html += `<div class="cookbook-server-entry" data-idx="${i}" data-platform="${esc(s.platform || '')}">`;
   const _srvTitle = s.name || (isLocal ? 'Local' : (s.host || `Server ${i + 1}`));
@@ -2535,7 +2551,7 @@ export function _serverEntryHtml(s, i, defaultServer, forceRemote, isNew) {
   html += `<input type="text" class="hwfit-sf cookbook-srv-host" value="${isLocal ? '' : esc(s.host || '')}" placeholder="e.g. user@ip" style="width:214.5px;flex-shrink:0;box-sizing:border-box;" ${isLocal ? 'readonly' : ''} />`;
   html += `<input type="text" class="hwfit-sf cookbook-srv-port" value="${esc(s.port || '')}" placeholder="Port" title="SSH port (default 22)" style="width:48px;flex-shrink:0;" ${isLocal ? 'readonly' : ''} />`;
   html += `<select class="hwfit-sf cookbook-srv-env">${envOpts}</select>`;
-  html += `<input type="text" class="hwfit-sf cookbook-srv-path" value="${esc(s.envPath || '')}" placeholder="${s.platform === 'windows' ? 'venv path' : '~/venv'}" />`;
+  html += `<input type="text" class="hwfit-sf cookbook-srv-path" value="${esc(s.envPath || '')}" placeholder="${s.platform === 'windows' ? 'venv/conda env' : '~/venv or conda-env'}" />`;
   html += `<span class="cookbook-dep-tag cookbook-dep-target" style="font-size:8px;flex-shrink:0;min-width:46px;text-align:center;visibility:hidden;">placeholder</span>`;
   html += `<span class="cookbook-srv-actions" style="display:inline-flex;gap:4px;align-items:center;width:78px;flex-shrink:0;justify-content:flex-end;"></span>`;
   html += `</div>`;
@@ -2614,13 +2630,14 @@ function _renderRecipes() {
     const isLocal = !s.host || s.host.toLowerCase() === 'local';
     if (isLocal) {
       s.host = '';
+      s.platform = _envState.hostPlatform || '';
       if (_localSeen) return false;
       _localSeen = true;
     }
     return true;
   });
   if (!_localSeen) {
-    _es.servers.unshift({ host: '', env: _es.env || 'none', envPath: _es.envPath || '', modelDir: '~/.cache/huggingface/hub' });
+    _es.servers.unshift({ host: '', env: _es.env || 'none', envPath: _es.envPath || '', modelDir: '~/.cache/huggingface/hub', platform: _envState.hostPlatform || '' });
   }
   if (_es.remoteHost && !_es.servers.some(s => s.host === _es.remoteHost)) {
     _es.servers.push({ host: _es.remoteHost, env: _es.env || 'none', envPath: _es.envPath || '', modelDir: '~/.cache/huggingface/hub' });
@@ -2680,8 +2697,7 @@ function _renderRecipes() {
   html += '<p class="memory-desc doclib-desc" style="margin-top:6px;">Scans your hardware for what models you can run. Hardware is cached; hit the scan button to re-probe after changing GPUs.</p>';
   html += '<div class="hwfit-toolbar" style="margin-top:9px;">';
   html += '<select class="cookbook-field-input hwfit-usecase" id="hwfit-usecase" style="height:28px;">';
-  html += '<option value="general" selected>Standard</option><option value="coding">Coding</option>';
-  html += '<option value="reasoning">Reasoning</option><option value="chat">Chat</option>';
+  html += '<option value="general" selected>Standard</option>';
   // Image tab removed — text→image gen is gone from this build (only inpaint
    // remains, which uses its own settings panel). Vision (multimodal) stays.
   html += '<option value="multimodal">Vision</option></select>';
@@ -2690,13 +2706,20 @@ function _renderRecipes() {
   // levers (Engine / Quant / Context) live to the right.
   html += '<input type="text" class="cookbook-field-input hwfit-search" id="hwfit-search" placeholder="Search models..." style="flex:1;" />';
   html += '<span class="hwfit-engine-wrap">';
-  html += '<select class="cookbook-field-input hwfit-engine" id="hwfit-engine" style="height:28px;" title="Filter by serving engine">';
+  html += '<select class="cookbook-field-input hwfit-engine" id="hwfit-engine" style="display:none;" title="Filter by serving engine">';
   html += '<option value="">Engine</option>';
   html += '<option value="llamacpp">llama.cpp</option>';
   html += '<option value="ollama">Ollama</option>';
   html += '<option value="vllm">vLLM</option>';
   html += '<option value="sglang">SGLang</option>';
+  html += '<option value="diffusers">Diffusers</option>';
   html += '</select>';
+  html += '<button type="button" class="cookbook-field-input hwfit-engine-btn" data-hwfit-engine-btn aria-haspopup="listbox" aria-expanded="false" title="Filter by serving engine">';
+  html += '<span class="hwfit-engine-btn-icon" data-hwfit-engine-icon aria-hidden="true"></span>';
+  html += '<span class="hwfit-engine-btn-label" data-hwfit-engine-label>Engine</span>';
+  html += '<svg class="hwfit-engine-caret" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg>';
+  html += '</button>';
+  html += '<div class="hwfit-engine-menu" data-hwfit-engine-menu role="listbox" hidden></div>';
   html += '<span class="hwfit-help-chip hwfit-help-chip-inline hwfit-engine-help" title="Rule of thumb: GGUF on single GPU / CPU+RAM → llama.cpp (or Ollama). Safetensors on multi-GPU NVIDIA → vLLM. SGLang is a vLLM-class alternative, sometimes faster on big-MoE / long-context.">?</span>';
   html += '</span>';
   // Quant (Q4/Q8/…). Default is "All" so the list shows the best-scoring

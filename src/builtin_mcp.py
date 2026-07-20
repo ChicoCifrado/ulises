@@ -13,6 +13,8 @@ import shutil
 import subprocess
 import sys
 
+from core.async_utils import safe_create_task
+
 from core.platform_compat import IS_WINDOWS, which_tool
 from src.runtime_paths import get_app_root
 
@@ -123,7 +125,7 @@ async def register_builtin_servers(mcp_manager):
         if not os.path.exists(script_path):
             logger.warning(f"Built-in MCP server script not found: {script_path}")
             continue
-        asyncio.create_task(_connect_python_server(server_id, script_path, name))
+        safe_create_task(_connect_python_server(server_id, script_path, name), name=f"mcp-py-{server_id}")
 
     # Register NPX-based servers in the background (they take longer to start)
     npx_path = _find_npx()
@@ -175,7 +177,7 @@ async def register_builtin_servers(mcp_manager):
             except BaseException as e:
                 logger.warning(f"Built-in NPX server {cfg['name']} error: {type(e).__name__}: {e}")
 
-    asyncio.create_task(_start_npx_servers())
+    safe_create_task(_start_npx_servers(), name="mcp-npx-start")
 
 
 def _npx_package_from_args(args):

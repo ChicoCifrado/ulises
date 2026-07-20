@@ -34,6 +34,7 @@
  *   uiModule:             object,
  * }} deps
  */
+import { t } from '../i18n.js';
 import { state } from './state.js';
 
 const TOPBAR_MENU_IDS = ['ge-image-menu', 'ge-filter-menu', 'ge-resize-menu', 'ge-save-menu'];
@@ -143,14 +144,14 @@ export function wireTopbar(deps) {
   // Edge popup — Width input + Feather / Delete action buttons.
   function applyEdgeAction(hardDelete) {
     const layer = activeLayer();
-    if (!layer || layer.locked) { uiModule.showToast('Select an unlocked layer'); return; }
+    if (!layer || layer.locked) { uiModule.showToast(t('editor.select_unlocked_layer')); return; }
     const widthInput = document.getElementById('ge-edge-width');
     const width = parseInt(widthInput?.value || '8');
-    if (isNaN(width) || width < 1) { uiModule.showToast('Invalid width'); return; }
+    if (isNaN(width) || width < 1) { uiModule.showToast(t('editor.invalid_width')); return; }
     saveState();
     applyEdgeFeather(layer, width, hardDelete);
     composite();
-    uiModule.showToast(hardDelete ? `Edges deleted ${width}px` : `Edges feathered ${width}px`);
+    uiModule.showToast(hardDelete ? t('editor.edges_deleted', { width }) : t('editor.edges_feathered', { width }));
   }
   {
     const btn = document.getElementById('ge-edge-menu-btn');

@@ -1,0 +1,30 @@
+{
+  "llm": {
+    "no_endpoint": "No model endpoint configured",
+    "all_fallbacks_failed": "All fallback candidates failed",
+    "post_failed": "POST {url} failed: {error}",
+    "upstream_error": "Upstream {url} -> {status}: {text}",
+    "unexpected_schema": "Unexpected schema from {url}: {data}",
+    "host_unreachable": "Upstream {host} unreachable (cooldown active)",
+    "cannot_reach": "Cannot reach {host}",
+    "cannot_reach_with_reason": "Cannot reach {host}: {error}",
+    "post_failed_after_retries": "POST {url} failed after {retries} attempts: {error}",
+    "read_timeout": "Read timeout",
+    "network_error": "Network error",
+    "upstream_error_stream": "HTTP {status}: {text}",
+    "auth_rejected": "{provider} rejected the API key",
+    "access_denied": "{provider} denied access (403)",
+    "auth_detail_suffix": " — {detail}",
+    "auth_check_endpoint": ". Check Model Endpoints → {provider} and re-paste the key.",
+    "not_found_404": "{provider} returned 404 — check the base URL and model name.",
+    "rate_limited_upstream": "{provider} rate-limited the request (429).",
+    "outage": "{provider} is having an outage (HTTP {status}).",
+    "http_status_detail": "{provider} returned HTTP {status}",
+    "detail_paren": " ({detail})",
+    "detail_colon": ": {detail}",
+    "chatgpt_credentials_expired": "ChatGPT Subscription credentials expired or were rejected. Reconnect the provider.",
+    "chatgpt_rate_limit": "ChatGPT Subscription quota or rate limit was reached. Retry after the upstream limit resets.",
+    "chatgpt_request_failed": "ChatGPT Subscription request failed",
+    "primary_model_failed": "primary model failed"
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "upload": {
+    "handler_failed": "Manejador de carga no configurado",
+    "save_failed": "Error al guardar el archivo: {{error}}",
+    "access_denied": "Acceso denegado",
+    "not_found": "Archivo no encontrado"
+  }
+}

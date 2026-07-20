@@ -35,6 +35,8 @@ from src.integrations import (
     migrate_from_settings,
 )
 
+from core.translations import t
+
 logger = logging.getLogger(__name__)
 
 
@@ -99,59 +101,59 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
     async def first_run_setup(body: SetupRequest, request: Request):
         """Create initial admin account. Only works if no accounts exist."""
         if not _setup_limiter.check(request.client.host):
-            raise HTTPException(429, "Too many requests — try again later")
+            raise HTTPException(429, t("auth.too_many_requests"))
         if auth_manager.is_configured:
-            raise HTTPException(400, "Already configured")
+            raise HTTPException(400, t("auth.already_configured"))
         if len(body.password) < PASSWORD_MIN_LENGTH:
-            raise HTTPException(400, f"Password must be at least {PASSWORD_MIN_LENGTH} characters")
+            raise HTTPException(400, t("auth.password_required_length").format(min=PASSWORD_MIN_LENGTH))
         if len(body.username.strip()) < 1:
-            raise HTTPException(400, "Username is required")
+            raise HTTPException(400, t("auth.username_required"))
         if body.username.lower() in RESERVED_USERNAMES:
-            raise HTTPException(403, "Username is reserved")
+            raise HTTPException(403, t("auth.username_reserved"))
         ok = await asyncio.to_thread(auth_manager.setup, body.username, body.password)
         if not ok:
-            raise HTTPException(500, "Setup failed")
-        return {"ok": True, "message": "Admin account created"}
+            raise HTTPException(500, t("auth.setup_failed"))
+        return {"ok": True, "message": t("auth.admin_account_created")}
 
     @router.post("/signup")
     async def signup(body: SignupRequest, request: Request):
         """Create a new user account. Only works if signup is enabled by admin."""
         if not _signup_limiter.check(request.client.host):
-            raise HTTPException(429, "Too many requests — try again later")
+            raise HTTPException(429, t("auth.too_many_requests"))
         if not auth_manager.is_configured:
-            raise HTTPException(400, "Run setup first")
+            raise HTTPException(400, t("auth.setup_first"))
         if not auth_manager.signup_enabled:
-            raise HTTPException(403, "Registration is disabled. Ask an admin for an account.")
+            raise HTTPException(403, t("auth.registration_disabled"))
         if len(body.password) < PASSWORD_MIN_LENGTH:
-            raise HTTPException(400, f"Password must be at least {PASSWORD_MIN_LENGTH} characters")
+            raise HTTPException(400, t("auth.password_required_length").format(min=PASSWORD_MIN_LENGTH))
         if len(body.username.strip()) < 1:
-            raise HTTPException(400, "Username is required")
+            raise HTTPException(400, t("auth.username_required"))
         if body.username.lower() in RESERVED_USERNAMES:
-            raise HTTPException(403, "Username is reserved")
+            raise HTTPException(403, t("auth.username_reserved"))
         ok = await asyncio.to_thread(auth_manager.create_user, body.username, body.password, is_admin=False)
         if not ok:
-            raise HTTPException(409, "Username already taken")
-        return {"ok": True, "message": "Account created"}
+            raise HTTPException(409, t("auth.username_taken"))
+        return {"ok": True, "message": t("auth.account_created")}
 
     @router.post("/login")
     async def login(body: LoginRequest, request: Request, response: Response):
         if not _login_limiter.check(request.client.host):
-            raise HTTPException(429, "Too many requests — try again later")
+            raise HTTPException(429, t("auth.too_many_requests"))
         # Verify password first
         username = body.username.strip().lower()
         if not await asyncio.to_thread(auth_manager.verify_password, username, body.password):
-            raise HTTPException(401, "Invalid credentials")
+            raise HTTPException(401, t("auth.invalid_credentials"))
         # Check 2FA if enabled
         if auth_manager.totp_enabled(username):
             if not body.totp_code:
                 # Password OK but need TOTP — tell client to show code input
                 return {"ok": False, "requires_totp": True, "username": username}
             if not auth_manager.totp_verify(username, body.totp_code):
-                raise HTTPException(401, "Invalid 2FA code")
+                raise HTTPException(401, t("auth.invalid_2fa_code"))
         # All checks passed — create session (password already verified above)
         token = await asyncio.to_thread(auth_manager.create_session_trusted, username)
         if not token:
-            raise HTTPException(401, "Invalid credentials")
+            raise HTTPException(401, t("auth.invalid_credentials"))
         cookie_kwargs = dict(
             key=SESSION_COOKIE,
             value=token,
@@ -199,13 +201,13 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
     async def change_password(body: ChangePasswordRequest, request: Request):
         user = _get_current_user(request)
         if not user:
-            raise HTTPException(401, "Not authenticated")
+            raise HTTPException(401, t("auth.not_authenticated"))
         if len(body.new_password) < PASSWORD_MIN_LENGTH:
-            raise HTTPException(400, f"Password must be at least {PASSWORD_MIN_LENGTH} characters")
+            raise HTTPException(400, t("auth.password_required_length").format(min=PASSWORD_MIN_LENGTH))
         current_token = request.cookies.get(SESSION_COOKIE)
         ok = await asyncio.to_thread(auth_manager.change_password, user, body.current_password, body.new_password)
         if not ok:
-            raise HTTPException(400, "Current password is incorrect")
+            raise HTTPException(400, t("auth.current_password_incorrect"))
         await asyncio.to_thread(auth_manager.revoke_user_sessions, user, current_token)
         return {"ok": True}
 
@@ -218,12 +220,12 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
         """Generate a TOTP secret and return the QR code URI."""
         user = _get_current_user(request)
         if not user:
-            raise HTTPException(401, "Not authenticated")
+            raise HTTPException(401, t("auth.not_authenticated"))
         if auth_manager.totp_enabled(user):
-            raise HTTPException(400, "2FA is already enabled")
+            raise HTTPException(400, t("auth.2fa_already_enabled"))
         secret = auth_manager.totp_generate_secret(user)
         if not secret:
-            raise HTTPException(500, "Failed to generate secret")
+            raise HTTPException(500, t("auth.failed_generate_secret"))
         uri = auth_manager.totp_get_provisioning_uri(user, secret)
         # Generate QR code as base64 PNG
         import qrcode, io, base64
@@ -241,9 +243,9 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
         """Verify a TOTP code to confirm 2FA setup. Returns backup codes."""
         user = _get_current_user(request)
         if not user:
-            raise HTTPException(401, "Not authenticated")
+            raise HTTPException(401, t("auth.not_authenticated"))
         if not auth_manager.totp_confirm_enable(user, body.code):
-            raise HTTPException(400, "Invalid code — try again")
+            raise HTTPException(400, t("auth.invalid_code"))
         backup = auth_manager.users.get(user, {}).get("totp_backup_codes", [])
         return {"ok": True, "backup_codes": backup}
 
@@ -255,9 +257,9 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
         """Disable 2FA. Requires password confirmation."""
         user = _get_current_user(request)
         if not user:
-            raise HTTPException(401, "Not authenticated")
+            raise HTTPException(401, t("auth.not_authenticated"))
         if not auth_manager.totp_disable(user, body.password):
-            raise HTTPException(400, "Invalid password")
+            raise HTTPException(400, t("auth.invalid_password"))
         return {"ok": True}
 
     @router.get("/2fa/status")
@@ -265,7 +267,7 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
         """Check if 2FA is enabled for the current user."""
         user = _get_current_user(request)
         if not user:
-            raise HTTPException(401, "Not authenticated")
+            raise HTTPException(401, t("auth.not_authenticated"))
         return {"enabled": auth_manager.totp_enabled(user)}
 
     # Admin-only routes
@@ -273,51 +275,51 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
     async def list_users(request: Request):
         user = _get_current_user(request)
         if not user or not auth_manager.is_admin(user):
-            raise HTTPException(403, "Admin only")
+            raise HTTPException(403, t("admin.admin_only"))
         return {"users": auth_manager.list_users()}
 
     @router.post("/users")
     async def admin_create_user(body: CreateUserRequest, request: Request):
         user = _get_current_user(request)
         if not user or not auth_manager.is_admin(user):
-            raise HTTPException(403, "Admin only")
+            raise HTTPException(403, t("admin.admin_only"))
         if len(body.password) < PASSWORD_MIN_LENGTH:
-            raise HTTPException(400, f"Password must be at least {PASSWORD_MIN_LENGTH} characters")
+            raise HTTPException(400, t("auth.password_required_length").format(min=PASSWORD_MIN_LENGTH))
         if len(body.username.strip()) < 1:
-            raise HTTPException(400, "Username is required")
+            raise HTTPException(400, t("auth.username_required"))
         if body.username.lower() in RESERVED_USERNAMES:
-            raise HTTPException(403, "Username is reserved")
+            raise HTTPException(403, t("auth.username_reserved"))
         ok = auth_manager.create_user(body.username, body.password, body.is_admin)
         if not ok:
-            raise HTTPException(409, "Username already taken")
+            raise HTTPException(409, t("auth.username_taken"))
         return {"ok": True}
 
     @router.put("/users/{username}/privileges")
     async def update_user_privileges(username: str, request: Request):
         user = _get_current_user(request)
         if not user or not auth_manager.is_admin(user):
-            raise HTTPException(403, "Admin only")
+            raise HTTPException(403, t("admin.admin_only"))
         body = await request.json()
         ok = auth_manager.set_privileges(username, body)
         if not ok:
-            raise HTTPException(404, "User not found or is admin")
+            raise HTTPException(404, t("admin.user_not_found"))
         return {"ok": True, "privileges": auth_manager.get_privileges(username)}
 
     @router.put("/users/{username}/rename")
     async def rename_user(username: str, body: RenameUserRequest, request: Request):
         user = _get_current_user(request)
         if not user or not auth_manager.is_admin(user):
-            raise HTTPException(403, "Admin only")
+            raise HTTPException(403, t("admin.admin_only"))
         old_username = (username or "").strip().lower()
         new_username = (body.username or "").strip().lower()
         if not new_username:
-            raise HTTPException(400, "Username required")
+            raise HTTPException(400, t("auth.username_required"))
         if old_username == new_username:
             return {"ok": True, "username": new_username, "renamed_self": old_username == user}
         if old_username not in auth_manager.users:
-            raise HTTPException(404, "User not found")
+            raise HTTPException(404, t("admin.user_not_found"))
         if new_username in auth_manager.users:
-            raise HTTPException(409, "Username already taken")
+            raise HTTPException(409, t("auth.username_taken"))
 
         # Gate on auth first. Every mutation below is contingent on this
         # succeeding — doing it last meant a rejected rename (e.g. reserved
@@ -325,7 +327,7 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
         # way to roll them back.
         ok = auth_manager.rename_user(old_username, new_username, user)
         if not ok:
-            raise HTTPException(400, "Cannot rename user")
+            raise HTTPException(400, t("admin.cannot_rename_user"))
 
         def _rollback_auth_rename() -> bool:
             # On self-rename the admin session has already moved to the new
@@ -370,7 +372,7 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
                     "Auth rename %s -> %s could not be rolled back after owner migration failure",
                     old_username, new_username,
                 )
-            raise HTTPException(500, "Failed to rename user data")
+            raise HTTPException(500, t("admin.rename_failed"))
 
         # Per-user prefs are JSON-backed, not SQL-backed.
         try:
@@ -536,14 +538,14 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
         """
         user = _get_current_user(request)
         if not user or not auth_manager.is_admin(user):
-            raise HTTPException(403, "Admin only")
+            raise HTTPException(403, t("admin.admin_only"))
         result = auth_manager.set_admin(username, body.is_admin, user)
         if result is SetAdminResult.USER_NOT_FOUND:
-            raise HTTPException(404, "User not found")
+            raise HTTPException(404, t("admin.user_not_found"))
         if result is SetAdminResult.NOT_AUTHORIZED:
-            raise HTTPException(403, "Admin only")
+            raise HTTPException(403, t("admin.admin_only"))
         if result is SetAdminResult.LAST_ADMIN:
-            raise HTTPException(400, "Cannot demote the last admin")
+            raise HTTPException(400, t("admin.cannot_demote_last_admin"))
         target = (username or "").strip().lower()
         return {
             "ok": True,
@@ -563,7 +565,7 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
         """
         user = _get_current_user(request)
         if not user or not auth_manager.is_admin(user):
-            raise HTTPException(403, "Admin only")
+            raise HTTPException(403, t("admin.admin_only"))
         auth_manager.signup_enabled = not auth_manager.signup_enabled
         return {"ok": True, "signup_enabled": auth_manager.signup_enabled}
 
@@ -572,7 +574,7 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
         """Set open signup enabled state. Admin only."""
         user = _get_current_user(request)
         if not user or not auth_manager.is_admin(user):
-            raise HTTPException(403, "Admin only")
+            raise HTTPException(403, t("admin.admin_only"))
         auth_manager.signup_enabled = body.enabled
         return {"ok": True,"signup_enabled": auth_manager.signup_enabled}
 
@@ -580,7 +582,7 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
     async def admin_delete_user(body: DeleteUserRequest, request: Request):
         user = _get_current_user(request)
         if not user or not auth_manager.is_admin(user):
-            raise HTTPException(403, "Admin only")
+            raise HTTPException(403, t("admin.admin_only"))
 
         def _invalidate_api_token_cache():
             try:
@@ -599,7 +601,7 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
             _invalidate_api_token_cache()
             raise
         if not ok:
-            raise HTTPException(400, "Cannot delete user")
+            raise HTTPException(400, t("admin.cannot_delete_user"))
         # delete_user removes the user's ApiToken rows, but the bearer-auth
         # middleware serves from an in-memory prefix->token cache that only
         # rebuilds when flagged dirty. Without this, a deleted user's already
@@ -620,7 +622,7 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
         """Admin only: update feature toggles."""
         user = _get_current_user(request)
         if not user or not auth_manager.is_admin(user):
-            raise HTTPException(403, "Admin only")
+            raise HTTPException(403, t("admin.admin_only"))
         body = await request.json()
         current = _load_features()
         for key in current:
@@ -647,7 +649,7 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
         """Admin only: update app settings."""
         user = _get_current_user(request)
         if not user or not auth_manager.is_admin(user):
-            raise HTTPException(403, "Admin only")
+            raise HTTPException(403, t("admin.admin_only"))
         body = await request.json()
         current = _load_settings()
         # Per-key validation for numeric settings: coerce to int and clamp to a
@@ -665,7 +667,7 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
                 try:
                     val = int(val)
                 except (TypeError, ValueError):
-                    raise HTTPException(400, f"{key} must be an integer")
+                    raise HTTPException(400, t("auth.invalid_integer").format(key=key))
                 val = max(lo, min(val, hi))
             current[key] = val
         _save_settings(current)
@@ -681,7 +683,7 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
         """List all integrations (admin only, keys masked)."""
         user = _get_current_user(request)
         if not user or not auth_manager.is_admin(user):
-            raise HTTPException(403, "Admin only")
+            raise HTTPException(403, t("admin.admin_only"))
         items = load_integrations()
         # Mask API keys for frontend display
         safe = [mask_integration_secret(item) for item in items]
@@ -697,7 +699,7 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
         """Create a new integration (admin only)."""
         user = _get_current_user(request)
         if not user or not auth_manager.is_admin(user):
-            raise HTTPException(403, "Admin only")
+            raise HTTPException(403, t("admin.admin_only"))
         body = await request.json()
         item = add_integration(body)
         return {"ok": True, "integration": mask_integration_secret(item)}
@@ -707,11 +709,11 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
         """Update an existing integration (admin only)."""
         user = _get_current_user(request)
         if not user or not auth_manager.is_admin(user):
-            raise HTTPException(403, "Admin only")
+            raise HTTPException(403, t("admin.admin_only"))
         body = await request.json()
         item = update_integration(integration_id, body)
         if not item:
-            raise HTTPException(404, "Integration not found")
+            raise HTTPException(404, t("integration.not_found"))
         return {"ok": True, "integration": mask_integration_secret(item)}
 
     @router.delete("/integrations/{integration_id}")
@@ -719,10 +721,10 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
         """Delete an integration (admin only)."""
         user = _get_current_user(request)
         if not user or not auth_manager.is_admin(user):
-            raise HTTPException(403, "Admin only")
+            raise HTTPException(403, t("admin.admin_only"))
         ok = delete_integration(integration_id)
         if not ok:
-            raise HTTPException(404, "Integration not found")
+            raise HTTPException(404, t("integration.not_found"))
         return {"ok": True}
 
     @router.post("/integrations/{integration_id}/test")
@@ -730,10 +732,10 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
         """Test connectivity to an integration (admin only)."""
         user = _get_current_user(request)
         if not user or not auth_manager.is_admin(user):
-            raise HTTPException(403, "Admin only")
+            raise HTTPException(403, t("admin.admin_only"))
         integ = get_integration(integration_id)
         if not integ:
-            raise HTTPException(404, "Integration not found")
+            raise HTTPException(404, t("integration.not_found"))
         preset = (integ.get("preset") or integ.get("name", "")).lower()
 
         # ntfy is special: a GET / proves the server is reachable but
@@ -784,24 +786,20 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
                     # is right there in the success line.
                     return {
                         "ok": True,
-                        "message": (
-                            f"Sent to {full_url} — on your ntfy app, "
-                            f"subscribe to topic \"{topic}\" with server "
-                            f"\"{base}\" (or paste the full URL: {full_url})."
-                        ),
+                        "message": t("integration.ntfy_test_success").format(full_url=full_url, topic=topic, base=base),
                     }
-                return {"ok": False, "message": f"ntfy returned HTTP {r.status_code} from {full_url}: {r.text[:200]}"}
+                return {"ok": False, "message": t("integration.ntfy_http_error").format(status_code=r.status_code, full_url=full_url, detail=r.text[:200])}
             except Exception as e:
                 hint = ""
                 if parsed.hostname not in ("127.0.0.1", "localhost"):
-                    hint = " If this is Docker Compose ntfy, set NTFY_BIND to that host/Tailscale IP and NTFY_BASE_URL to the same server URL in .env, then recreate ntfy."
-                return {"ok": False, "message": f"ntfy publish to {full_url} failed: {e}.{hint}"[:500]}
+                    hint = t("integration.ntfy_docker_hint")
+                return {"ok": False, "message": t("integration.ntfy_publish_failed").format(full_url=full_url, error=e, hint=hint)[:500]}
 
         if preset == "discord_webhook":
             import httpx
             webhook_url = (integ.get("base_url") or "").strip()
             if not webhook_url:
-                return {"ok": False, "message": "No webhook URL set — paste the full Discord webhook URL into the Base URL field."}
+                return {"ok": False, "message": t("integration.discord_no_webhook_url")}
             payload = {
                 "embeds": [{
                     "title": "Ulises connectivity test",
@@ -813,10 +811,10 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
                 async with httpx.AsyncClient(timeout=8.0) as client:
                     r = await client.post(webhook_url, json=payload)
                 if r.is_success:
-                    return {"ok": True, "message": "Test embed sent — check your Discord channel to confirm it arrived."}
-                return {"ok": False, "message": f"Discord returned HTTP {r.status_code}: {r.text[:200]}"}
+                    return {"ok": True, "message": t("integration.discord_test_success")}
+                return {"ok": False, "message": t("integration.discord_http_error").format(status_code=r.status_code, detail=r.text[:200])}
             except Exception as e:
-                return {"ok": False, "message": f"Request failed: {e}"[:400]}
+                return {"ok": False, "message": t("integration.request_failed").format(error=e)[:400]}
 
         # All other presets: GET against a known health endpoint.
         # Fall back to detecting from name if preset is missing.
@@ -830,7 +828,7 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
         path = health_paths.get(preset, "/")
         result = await execute_api_call(integration_id, "GET", path)
         if result.get("exit_code", 1) == 0:
-            return {"ok": True, "message": "Connection successful"}
-        return {"ok": False, "message": (result.get("error") or "Connection failed")[:300]}
+            return {"ok": True, "message": t("integration.connection_successful")}
+        return {"ok": False, "message": (result.get("error") or t("integration.connection_failed"))[:300]}
 
     return router

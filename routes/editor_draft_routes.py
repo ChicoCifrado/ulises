@@ -24,6 +24,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
+from core.translations import t
 from core.database import EditorDraft, SessionLocal
 from src.auth_helpers import get_current_user
 
@@ -100,7 +101,7 @@ def setup_editor_draft_routes() -> APIRouter:
                 EditorDraft.id == draft_id, EditorDraft.is_active == True
             ).first()
             if not d or not _owns(d, user):
-                raise HTTPException(404, "Draft not found")
+                raise HTTPException(404, t("editor_draft.not_found"))
             return {
                 **_summary(d),
                 "payload": _load_payload(d.payload),
@@ -130,7 +131,7 @@ def setup_editor_draft_routes() -> APIRouter:
         except Exception as e:
             db.rollback()
             logger.warning(f"editor-draft create failed: {e}")
-            raise HTTPException(500, "Could not save draft")
+            raise HTTPException(500, t("editor_draft.save_failed"))
         finally:
             db.close()
 
@@ -143,7 +144,7 @@ def setup_editor_draft_routes() -> APIRouter:
                 EditorDraft.id == draft_id, EditorDraft.is_active == True
             ).first()
             if not d or not _owns(d, user):
-                raise HTTPException(404, "Draft not found")
+                raise HTTPException(404, t("editor_draft.not_found"))
             if body.name is not None:
                 d.name = body.name[:200]
             if body.width is not None:
@@ -162,7 +163,7 @@ def setup_editor_draft_routes() -> APIRouter:
         except Exception as e:
             db.rollback()
             logger.warning(f"editor-draft update failed: {e}")
-            raise HTTPException(500, "Could not update draft")
+            raise HTTPException(500, t("editor_draft.update_failed"))
         finally:
             db.close()
 
@@ -173,7 +174,7 @@ def setup_editor_draft_routes() -> APIRouter:
         try:
             d = db.query(EditorDraft).filter(EditorDraft.id == draft_id).first()
             if not d or not _owns(d, user):
-                raise HTTPException(404, "Draft not found")
+                raise HTTPException(404, t("editor_draft.not_found"))
             d.is_active = False
             db.commit()
             return {"status": "deleted", "id": draft_id}

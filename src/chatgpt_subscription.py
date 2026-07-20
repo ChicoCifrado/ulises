@@ -16,6 +16,7 @@ from typing import Any, Dict, Optional
 
 import httpx
 from fastapi import HTTPException
+from core.translations import t
 
 DEFAULT_CHATGPT_SUBSCRIPTION_BASE_URL = (
     os.getenv("CHATGPT_SUBSCRIPTION_BASE_URL", "").strip().rstrip("/")
@@ -295,7 +296,7 @@ def to_http_exception(exc: Exception) -> HTTPException:
     if isinstance(exc, ChatGPTSubscriptionRateLimited):
         return HTTPException(429, str(exc))
     if isinstance(exc, (ChatGPTSubscriptionReauthRequired, ChatGPTSubscriptionAuthNotFound)):
-        return HTTPException(401, f"{exc} Reconnect the provider.")
+        return HTTPException(401, f"{exc} {t('chatgpt.reconnect_provider')}")
     return HTTPException(502, str(exc))
 
 

@@ -1,0 +1,23 @@
+{
+  "ai_interaction": {
+    "pipeline_format": "Cada línea debe ser: model | instruction (o usa formato JSON)",
+    "pipeline_no_steps": "No se proporcionaron pasos en el pipeline",
+    "pipeline_max_steps": "Máximo de {max} pasos permitidos",
+    "pipeline_step_requires": "Paso {num}: se requieren 'model' e 'instruction'",
+    "pipeline_step_error": "Paso {num}: {error}",
+    "pipeline_failed": "El pipeline falló en el paso {num}: {error}",
+    "memory_not_found": "Memoria '{id}' no encontrada",
+    "memory_text_empty": "El texto de la memoria no puede estar vacío",
+    "memory_new_text_empty": "El texto nuevo no puede estar vacío",
+    "no_image_model": "No se encontró un modelo de imagen. Configura uno en Administración → Generación de Imágenes.",
+    "image_gen_failed": "Error en la generación de imagen (HTTP {code}): {error}",
+    "no_images_returned": "No se devolvieron imágenes de la API",
+    "unsafe_image_url": "La API de imágenes devolvió una URL no segura: {reason}",
+    "unexpected_image_format": "La API de imágenes devolvió un formato inesperado (sin b64_json ni url)",
+    "image_gen_timed_out": "La generación de imagen agotó el tiempo de espera (300s). El modelo puede estar sobrecargado — inténtalo de nuevo o usa quality=low.",
+    "image_gen_error": "Error en la generación de imagen: {error}",
+    "memory_manager_unavailable": "Gestor de memoria no disponible",
+    "rag_manager_unavailable": "Gestor de RAG no disponible",
+    "docs_manager_unavailable": "Gestor de documentos personales no disponible"
+  }
+}

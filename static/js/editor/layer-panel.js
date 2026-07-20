@@ -34,6 +34,7 @@
  *   uiModule:                        object | null,
  * }} deps
  */
+import { t } from '../i18n.js';
 import { state } from './state.js';
 import {
   layerHasAdjustments,
@@ -268,7 +269,7 @@ export function createLayerPanelRenderer(deps) {
         state.activeLayerId = copy.id;
         composite();
         render();
-        if (uiModule) uiModule.showToast('Layer duplicated');
+        if (uiModule) uiModule.showToast(t('editor.layer_duplicated'));
       });
       controls.appendChild(dupBtn);
 
@@ -339,7 +340,7 @@ export function createLayerPanelRenderer(deps) {
           mergeLayerDownAtIndex(i);
           composite();
           render();
-          uiModule.showToast('Layer merged down');
+          uiModule.showToast(t('editor.layer_merged_down'));
         });
         controls.appendChild(mergeDownBtn);
       }
@@ -356,8 +357,8 @@ export function createLayerPanelRenderer(deps) {
           e.stopPropagation();
           if (layer.isBase && uiModule?.styledConfirm) {
             const ok = await uiModule.styledConfirm(
-              'Delete the original photo layer? Ctrl+Z brings it back.',
-              { confirmText: 'Delete', cancelText: 'Cancel', danger: true }
+              t('editor.delete_original_photo_layer'),
+              { confirmText: t('editor.delete'), cancelText: t('editor.cancel'), danger: true }
             );
             if (!ok) return;
           }

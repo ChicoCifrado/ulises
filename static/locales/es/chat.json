@@ -1,0 +1,94 @@
+{
+  "chat": {
+    "title": "Ulises Chat",
+    "page_titles": {
+      "default": "Ulises Chat",
+      "calendar": "Calendario — Ulises",
+      "notes": "Notas — Ulises",
+      "cookbook": "Cookbook — Ulises",
+      "email": "Correo — Ulises",
+      "memory": "Memoria — Ulises",
+      "gallery": "Galería — Ulises",
+      "tasks": "Tareas — Ulises",
+      "library": "Biblioteca — Ulises"
+    },
+    "welcome": "Bienvenido, ",
+    "welcome_setup": "escribe /setup",
+    "welcome_setup_title": "Haz clic para iniciar la configuración",
+    "nobody_mode_title": "Activar modo Nobody — sin memoria, sin historial",
+    "nobody": "Nobody",
+    "placeholder": "Envíale un mensaje a Ulises...",
+    "aria_label": "Campo de mensaje",
+    "send_btn": "+ Nuevo",
+    "send_aria": "Nuevo chat",
+    "agent_mode": "Agente",
+    "chat_mode": "Chat",
+    "scroll_to_bottom": "Ir al final",
+    "context_compacted": "Contexto compactado — mensajes antiguos resumidos",
+    "message_deleted": "Mensaje eliminado",
+    "message_edited": "Mensaje editado",
+    "forked": "Bifurcado → {{name}}",
+    "model_failed_fallback": "⚠ {{failed}} falló — respondió {{fallback}}",
+    "tips": {
+      "desktop": [
+        "Consejo: Presiona Ctrl+K para buscar en todas tus conversaciones.",
+        "Consejo: Presiona Ctrl+B para mostrar u ocultar la barra lateral rápidamente.",
+        "Consejo: Mayús+clic en el botón de la barra lateral para moverla al otro lado.",
+        "Consejo: Arrastra y suelta archivos en el chat para adjuntarlos.",
+        "Consejo: Haz clic derecho en una sesión para renombrar, eliminar y opciones de memoria."
+      ],
+      "phone": [
+        "Consejo: Mantén presionada una sesión para renombrar, eliminar y opciones de memoria.",
+        "Consejo: Toca el ícono del ojo para el modo Nobody — sin historial guardado.",
+        "Consejo: Cambia al modo Agente para búsqueda web y ejecución de código.",
+        "Consejo: Usa el modo Comparar para probar distintos modelos lado a lado.",
+        "Consejo: Adjunta imágenes o archivos usando el botón + junto al campo de texto."
+      ],
+      "setup": "Escribe /setup, luego elige modelos locales o API."
+    },
+    "overflow_menu": {
+      "title": "Más herramientas",
+      "attach_files": "Adjuntar archivos",
+      "documents": "Documentos",
+      "rag": "RAG",
+      "workspace": "Espacio de trabajo",
+      "tts": "Modo TTS",
+      "prompt": "Prompt"
+    },
+    "tool_indicators": {
+      "web_search": "Búsqueda web",
+      "shell": "Acceso a terminal",
+      "workspace_title": "Espacio de trabajo — clic para limpiar",
+      "workspace_clear": "Limpiar espacio de trabajo",
+      "rag_title": "RAG activo — clic para desactivar",
+      "rag_label": "RAG",
+      "research_title": "Deep Research activo — clic para desactivar",
+      "research_label": "Research",
+      "group_title": "Chat grupal activo — clic para desactivar",
+      "group_label": "Grupo",
+      "persona_title": "Persona activa — clic para desactivar",
+      "compare_title": "Comparar activo — clic para desactivar",
+      "compare_label": "Comparar"
+    },
+    "model_picker": {
+      "switch": "Cambiar modelo",
+      "select": "Seleccionar modelo",
+      "search_placeholder": "Buscar modelos...",
+      "search_aria": "Buscar modelos",
+      "refresh": "Actualizar selector de modelos",
+      "add_endpoints": "Agregar endpoints de modelos",
+      "no_model": "No hay modelo seleccionado para este chat. Abre el selector y elige uno antes de enviar.",
+      "model_removed": "El endpoint del modelo seleccionado fue eliminado. Elige otro modelo en Ajustes."
+    },
+    "errors": {
+      "session_not_found": "Sesión '{{name}}' no encontrada",
+      "session_not_found_generic": "Sesión no encontrada",
+      "invalid_json": "JSON inválido: {{error}}",
+      "invalid_request": "Parámetros de solicitud inválidos",
+      "no_active_run": "No hay ejecución activa para esta sesión",
+      "no_active_stream": "No hay transmisión activa para esta sesión",
+      "image_gen_disabled": "La generación de imágenes está desactivada por el administrador.",
+      "tool_blocked": "Herramienta bloqueada por la política"
+    }
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "admin": {
+    "admin_only": "Solo administradores",
+    "user_not_found": "Usuario no encontrado",
+    "cannot_demote_last_admin": "No se puede degradar al último administrador",
+    "cannot_delete_user": "No se puede eliminar el usuario",
+    "cannot_rename_user": "No se puede renombrar el usuario",
+    "rename_failed": "Error al renombrar los datos del usuario",
+    "features_not_available": "Función no disponible",
+    "not_authenticated": "No autenticado",
+    "internal_error": "Error interno",
+    "no_models_found": "No se encontraron modelos o el endpoint está fuera de línea",
+    "workspace_admin_only": "La navegación del espacio de trabajo es solo para administradores",
+    "workspace_selection_admin": "La selección de espacio de trabajo es solo para administradores",
+    "integration_not_found": "Integración no encontrada",
+    "api_token_not_scoped": "El API token no tiene permisos para chat"
+  }
+}

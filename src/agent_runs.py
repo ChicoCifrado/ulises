@@ -19,6 +19,8 @@ import json
 import logging
 from typing import AsyncGenerator, Dict, Optional
 
+from core.async_utils import safe_create_task
+
 logger = logging.getLogger(__name__)
 
 
@@ -72,7 +74,7 @@ def _schedule_evict(session_id: str) -> None:
         if cur is run_ref and cur.status != "running" and not cur.subscribers:
             _RUNS.pop(session_id, None)
 
-    run.evict_task = asyncio.create_task(_evict(run))
+    run.evict_task = safe_create_task(_evict(run), name=f"evict-{session_id}")
 
 
 def is_active(session_id: str) -> bool:
@@ -151,7 +153,7 @@ def start(session_id: str, agen: AsyncGenerator[str, None]) -> _Run:
             prev.evict_task.cancel()
     run = _Run()
     _RUNS[session_id] = run
-    run.task = asyncio.create_task(_drain(session_id, agen, prev_task))
+    run.task = safe_create_task(_drain(session_id, agen, prev_task), name=f"drain-{session_id}")
     return run
 
 

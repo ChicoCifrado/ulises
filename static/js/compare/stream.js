@@ -2,6 +2,7 @@
 import state from './state.js';
 import { addFinishBadge } from './vote.js';
 import { getModelCost, safeDisplayImageSrc } from '../chatRenderer.js';
+import { t } from '../i18n.js';
 import markdownModule from '../markdown.js';
 import spinnerModule from '../spinner.js';
 import uiModule from '../ui.js';
@@ -499,7 +500,7 @@ async function streamToPane(paneIdx, sessionId, message, aiMsgEl, opts) {
         else { const ta = document.createElement('textarea'); ta.value = txt; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); }
         copyBtn.textContent = '\u2713';
         setTimeout(() => { copyBtn.textContent = '\u2398'; }, 1500);
-        if (uiModule) uiModule.showToast('Prompt copied!');
+        if (uiModule) uiModule.showToast(t('compare.prompt_copied'));
       });
       actions.appendChild(copyBtn);
 

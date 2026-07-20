@@ -12,6 +12,7 @@ import logging
 import httpx
 
 from core.database import McpServer, SessionLocal
+from core.translations import t
 from core.middleware import require_admin
 from src.constants import DATA_DIR, MCP_OAUTH_DIR
 from src.mcp_manager import McpManager
@@ -487,8 +488,8 @@ def setup_mcp_routes(mcp_manager: McpManager):
         from src.mcp_oauth import resolve_pending
         if resolve_pending(state, code):
             return HTMLResponse(_oauth_result_page(
-                "Authorization Successful",
-                "The MCP server is connecting. You can close this window and return to Ulises.",
+                t("mcp.auth_successful"),
+                t("mcp.connecting"),
                 success=True,
             ))
         # Legacy Google path: state is the server_id
@@ -503,9 +504,9 @@ def setup_mcp_routes(mcp_manager: McpManager):
             params = urllib.parse.parse_qs(parsed.query)
             code = params.get("code", [None])[0]
             if not code:
-                return HTMLResponse(_oauth_result_page("Error", "No authorization code found in the URL. Make sure you copied the full URL from your browser."), status_code=400)
+                return HTMLResponse(_oauth_result_page(t("mcp.error"), t("mcp.no_auth_code")), status_code=400)
         except Exception:
-            return HTMLResponse(_oauth_result_page("Error", "Invalid URL format."), status_code=400)
+            return HTMLResponse(_oauth_result_page(t("mcp.error"), t("mcp.invalid_url")), status_code=400)
 
         # Generic MCP OAuth: if the pasted URL carries a state we are waiting on,
         # resolve it directly (the background connect finishes the handshake).
@@ -513,8 +514,8 @@ def setup_mcp_routes(mcp_manager: McpManager):
         from src.mcp_oauth import resolve_pending
         if state and resolve_pending(state, code):
             return HTMLResponse(_oauth_result_page(
-                "Authorization Successful",
-                "The MCP server is connecting. You can close this window and return to Ulises.",
+                t("mcp.auth_successful"),
+                t("mcp.connecting"),
                 success=True,
             ))
 
@@ -526,9 +527,9 @@ def setup_mcp_routes(mcp_manager: McpManager):
         try:
             srv = db.query(McpServer).filter(McpServer.id == server_id).first()
             if not srv:
-                return HTMLResponse(_oauth_result_page("Error", "Server not found."), status_code=404)
+                return HTMLResponse(_oauth_result_page(t("mcp.error"), t("mcp.server_not_found")), status_code=404)
             if not srv.oauth_config:
-                return HTMLResponse(_oauth_result_page("Error", "No OAuth config."), status_code=400)
+                return HTMLResponse(_oauth_result_page(t("mcp.error"), t("mcp.no_oauth_config")), status_code=400)
 
             oauth_cfg = _sanitize_mcp_oauth_config(json.loads(srv.oauth_config))
             keys_file = oauth_cfg.get("keys_file", "")
@@ -559,7 +560,7 @@ def setup_mcp_routes(mcp_manager: McpManager):
             if resp.status_code != 200:
                 err = resp.text
                 logger.error(f"OAuth token exchange failed: {err}")
-                return HTMLResponse(_oauth_result_page("Authorization Failed", f"Google returned an error: {err}"), status_code=400)
+                return HTMLResponse(_oauth_result_page(t("mcp.auth_failed"), t("mcp.google_error").format(error=err)), status_code=400)
 
             tokens = resp.json()
             logger.info(f"OAuth tokens received for server {server_id}")
@@ -587,22 +588,22 @@ def setup_mcp_routes(mcp_manager: McpManager):
                 status = mcp_manager.get_server_status(server_id)
                 tool_count = status.get("tool_count", 0)
                 return HTMLResponse(_oauth_result_page(
-                    "Authorization Successful",
-                    f"{srv.name} connected with {tool_count} tools. You can close this window.",
+                    t("mcp.auth_successful"),
+                    t("mcp.connected").format(name=srv.name, count=tool_count),
                     success=True,
                 ))
             else:
                 status = mcp_manager.get_server_status(server_id)
                 return HTMLResponse(_oauth_result_page(
-                    "Authorized but Connection Failed",
-                    f"Tokens saved, but the server failed to connect: {status.get('error', 'unknown error')}. Try reconnecting from Settings.",
+                    t("mcp.connection_failed"),
+                    t("mcp.connection_failed_desc").format(error=status.get("error", "unknown error")),
                 ))
         except HTTPException as e:
             logger.warning(f"OAuth callback rejected: {e.detail}")
-            return HTMLResponse(_oauth_result_page("Error", str(e.detail)), status_code=e.status_code)
+            return HTMLResponse(_oauth_result_page(t("mcp.error"), str(e.detail)), status_code=e.status_code)
         except Exception as e:
             logger.exception(f"OAuth callback error: {e}")
-            return HTMLResponse(_oauth_result_page("Error", str(e)), status_code=500)
+            return HTMLResponse(_oauth_result_page(t("mcp.error"), str(e)), status_code=500)
         finally:
             db.close()
 
@@ -624,7 +625,7 @@ def _oauth_authorize_page(
     redirect_uri = html.escape(redirect_uri, quote=True)
     return f"""<!DOCTYPE html>
 <html><head>
-<meta charset="UTF-8"><title>Authorize — Ulises</title>
+<meta charset="UTF-8"><title>{t('mcp.authorize_google')} — Ulises</title>
 <style>
   body {{ font-family: 'Fira Code', monospace; background: #0f0f0f; color: #e0e0e0;
     display: flex; justify-content: center; align-items: center; min-height: 100vh; }}
@@ -655,19 +656,19 @@ def _oauth_authorize_page(
   .divider {{ border-top: 1px solid #333; margin: 1.2rem 0; }}
 </style></head>
 <body><div class="card">
-  <h2>Authorize Google Account</h2>
+  <h2>{t('mcp.authorize_google')}</h2>
   <div class="step">
-    <b>1.</b> Click the button below to sign in with Google<br>
-    <b>2.</b> After approving, your browser will show an error page — that's normal<br>
-    <b>3.</b> Copy the full URL from your browser's address bar<br>
-    <b>4.</b> Paste it below and click Connect
+    {t('mcp.step1')}<br>
+    {t('mcp.step2')}<br>
+    {t('mcp.step3')}<br>
+    {t('mcp.step4')}
   </div>
-  <a class="auth-link" href="{auth_url}" target="_blank" rel="noopener">Sign in with Google</a>
+  <a class="auth-link" href="{auth_url}" target="_blank" rel="noopener">{t('mcp.sign_in_with_google')}</a>
   <div class="divider"></div>
   <form method="POST" action="http://{host}/api/mcp/oauth/exchange/{server_id}">
-    <p>Paste the URL from your browser after signing in:</p>
+    <p>{t('mcp.paste_url')}</p>
     <input type="text" name="callback_url" placeholder="{redirect_uri}?code=..." required>
-    <br><button type="submit">Connect</button>
+    <br><button type="submit">{t('mcp.connect')}</button>
   </form>
 </div></body></html>"""
 

@@ -1,6 +1,7 @@
 // Memory Management Functions
 // This module handles all memory-related operations
 
+import { t } from './i18n.js';
 import uiModule from './ui.js';
 import sessionModule from './sessions.js';
 import spinnerModule from './spinner.js';
@@ -183,14 +184,14 @@ function buildCategoryChips() {
 async function syncToggles() {
   // The settings tab no longer hosts a separate "Memory in context" toggle —
   // the header toggle owns that pref directly now.
-  await syncPrefToggle('memory-enabled-header-toggle', 'memory_enabled', 'Memory enabled', 'Memory disabled', false);
+  await syncPrefToggle('memory-enabled-header-toggle', 'memory_enabled', t('memory.enabled'), t('memory.disabled'), false);
   // The Skills header toggle owns the `skills_enabled` pref (was never wired —
   // toggling it did nothing, so skills stayed on). Now it actually gates skill
   // injection (see chat_helpers.py: uprefs.skills_enabled).
-  await syncPrefToggle('skills-enabled-header-toggle', 'skills_enabled', 'Skills enabled', 'Skills disabled', false);
-  await syncPrefToggle('auto-memory-toggle', 'auto_memory', 'Auto-extract memories enabled', 'Auto-extract memories disabled', false);
-  await syncPrefToggle('auto-skills-toggle', 'auto_skills', 'Auto-extract skills enabled', 'Auto-extract skills disabled', false);
-  await syncPrefToggle('auto-approve-skills-toggle', 'auto_approve_skills', 'Auto-approve skills enabled', 'Auto-approve skills disabled', false);
+  await syncPrefToggle('skills-enabled-header-toggle', 'skills_enabled', t('skills.enabled'), t('skills.disabled'), false);
+  await syncPrefToggle('auto-memory-toggle', 'auto_memory', t('memory.auto_extract_enabled'), t('memory.auto_extract_disabled'), false);
+  await syncPrefToggle('auto-skills-toggle', 'auto_skills', t('skills.auto_extract_enabled'), t('skills.auto_extract_disabled'), false);
+  await syncPrefToggle('auto-approve-skills-toggle', 'auto_approve_skills', t('skills.auto_approve_enabled'), t('skills.auto_approve_disabled'), false);
   await syncPrefSlider('skill-confidence-slider', 'skill_min_confidence', 'skill-confidence-label', 0.85);
   await syncPrefNumber('skill-max-input', 'skill_max_injected', 3);
 
@@ -275,7 +276,7 @@ async function syncPrefSlider(elementId, prefKey, labelId, defaultVal) {
           body: JSON.stringify({ value: pref })
         });
         if (!res.ok) { showError('Failed to save preference'); return; }
-        showToast(pref === 0 ? 'Skill confidence: All' : `Skill confidence ≥ ${Math.round(pref * 100)}%`);
+        showToast(pref === 0 ? t('skills.confidence_all') : t('skills.confidence_format', { pct: Math.round(pref * 100) }));
       } catch (e) {
         console.error(`Failed to save ${prefKey} pref:`, e);
         showError('Failed to save preference');
@@ -317,7 +318,7 @@ async function syncPrefNumber(elementId, prefKey, defaultVal) {
           body: JSON.stringify({ value: v })
         });
         if (!res.ok) { showError('Failed to save preference'); return; }
-        showToast(v === 0 ? 'No skills injected' : `Max injected skills: ${v}`);
+        showToast(v === 0 ? t('skills.no_injected') : t('skills.max_injected_format', { count: v }));
       } catch (e) {
         console.error(`Failed to save ${prefKey} pref:`, e);
         showError('Failed to save preference');
@@ -487,7 +488,7 @@ async function bulkDelete() {
   await animateMemoryRemoval(deletedIds);
   exitSelectMode();
   await loadMemories();
-  showToast(`Deleted ${deleted} ${deleted === 1 ? 'memory' : 'memories'}`);
+  showToast(t('memory.deleted_format', { count: deleted }));
 }
 
 // ---- Tidy (audit) ----
@@ -527,7 +528,7 @@ export async function tidyMemories() {
     if ((data.removed || 0) === 0) {
       if (tidySpinner) tidySpinner.destroy();
       if (tidyBtn) { tidyBtn.disabled = false; tidyBtn.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" style="vertical-align:-1px;margin-right:2px;color:var(--accent, var(--red));"><path d="M12 0L14.59 8.41L23 12L14.59 15.59L12 24L9.41 15.59L1 12L9.41 8.41Z"/></svg> Tidy'; }
-      showToast('Already clean');
+      showToast(t('memory.already_clean'));
       return;
     }
 
@@ -559,7 +560,7 @@ export async function tidyMemories() {
     renderMemoryList();
     updateMemoryCount();
 
-    showToast(`Tidied: ${data.removed} removed (${data.before} \u2192 ${data.after})`);
+    showToast(t('memory.tidied_format', { removed: data.removed, before: data.before, after: data.after }));
   } catch (error) {
     console.error('Tidy failed:', error);
     showError('Tidy failed — check console');
@@ -1043,7 +1044,7 @@ async function saveInlineEdit(id, newText, newCategory) {
 
     if (response.ok) {
       await loadMemories();
-      showToast('Memory updated');
+      showToast(t('memory.updated'));
     } else {
       const errorData = await response.json();
       throw new Error(errorData.detail || 'Failed to update memory');
@@ -1103,7 +1104,7 @@ export async function addNewMemory() {
     if (response.ok) {
       input.value = '';
       await loadMemories();
-      showToast('Memory added');
+      showToast(t('memory.added'));
     } else {
       const errorData = await response.json();
       console.error('Server error details:', errorData);
@@ -1135,7 +1136,7 @@ async function togglePin(id, pinned) {
       const mem = memories.find(m => m.id === id);
       if (mem) mem.pinned = pinned;
       renderMemoryList();
-      showToast(pinned ? 'Pinned — always in context' : 'Unpinned — RAG only');
+      showToast(pinned ? t('memory.pinned') : t('memory.unpinned'));
     }
   } catch (e) {
     console.error('Failed to toggle pin:', e);
@@ -1157,7 +1158,7 @@ export async function deleteMemory(id) {
     if (response.ok) {
       await animateMemoryRemoval([id]);
       await loadMemories();
-      showToast('Memory deleted');
+      showToast(t('memory.deleted'));
     } else {
       throw new Error('Failed to delete');
     }
@@ -1225,7 +1226,7 @@ export async function extractMemory(sessionId) {
         });
         btn.disabled = true;
         btn.textContent = 'saved';
-        showToast('Saved to memory');
+        showToast(t('memory.saved'));
       });
       div.appendChild(txt);
       div.appendChild(btn);
@@ -1240,7 +1241,7 @@ export async function extractMemory(sessionId) {
 
 export function exportMemories() {
   if (!memories || memories.length === 0) {
-    showToast('No memories to export');
+    showToast(t('memory.no_memories_to_export'));
     return;
   }
   const data = JSON.stringify(memories, null, 2);
@@ -1251,7 +1252,7 @@ export function exportMemories() {
   a.download = 'memories.json';
   a.click();
   URL.revokeObjectURL(url);
-  showToast(`Exported ${memories.length} memories`);
+  showToast(t('memory.exported_format', { count: memories.length }));
 }
 
 // ---- Import from file ----
@@ -1359,7 +1360,7 @@ async function handleImportFile(file) {
         if (memList) memList.classList.remove('hidden');
         await loadMemories();
         document.querySelector('.memory-tab[data-memory-tab="browse"]')?.click();
-        showToast(`Saved ${saved} memories`);
+        showToast(t('memory.saved_format', { count: saved }));
       });
       headerActions.appendChild(saveAllBtn);
       headerActions.appendChild(backBtn);
@@ -1398,7 +1399,7 @@ async function handleImportFile(file) {
           updateHeaderTitle();
           btn.disabled = true;
           btn.textContent = 'saved';
-          showToast('Saved to memory');
+          showToast(t('memory.saved'));
         });
         const deleteBtn = document.createElement('button');
         deleteBtn.className = 'memory-item-btn delete';

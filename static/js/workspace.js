@@ -8,8 +8,8 @@
 import Storage, { KEYS } from './storage.js';
 import uiModule from './ui.js';
 import { makeWindowDraggable } from './windowDrag.js';
-
-const API_BASE = window.location.origin;
+import { API_BASE } from './apiBase.js';
+import { t } from './i18n.js';
 // Same folder glyph as the overflow menu item + pill (not an emoji).
 const _FOLDER_SVG = '<svg class="workspace-row-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>';
 let _modal = null;
@@ -86,7 +86,7 @@ export async function vetAndSetWorkspace(path) {
 
 export function clearWorkspace() {
   setWorkspace('');
-  if (uiModule && uiModule.showToast) uiModule.showToast('Workspace cleared');
+  if (uiModule && uiModule.showToast) uiModule.showToast(t('workspace.cleared'));
 }
 
 async function _load(path) {
@@ -134,7 +134,7 @@ async function _navigate(path) {
   try {
     _render(await _load(path));
   } catch (e) {
-    if (uiModule && uiModule.showError) uiModule.showError('Could not open folder');
+    if (uiModule && uiModule.showError) uiModule.showError(t('workspace.open_folder_failed'));
   }
 }
 
@@ -173,7 +173,7 @@ function _getModal() {
   });
   _modal.querySelector('#workspace-use').addEventListener('click', () => {
     setWorkspace(_curPath);
-    if (uiModule && uiModule.showToast) uiModule.showToast(`Workspace set: ${_basename(_curPath)}`);
+    if (uiModule && uiModule.showToast) uiModule.showToast(t('workspace.set', { name: _basename(_curPath) }));
     closeWorkspaceBrowser();
   });
   const content = _modal.querySelector('.modal-content');
@@ -188,7 +188,7 @@ export async function openWorkspaceBrowser() {
   try {
     _render(await _load(getWorkspace() || ''));
   } catch (e) {
-    if (uiModule && uiModule.showError) uiModule.showError('Could not browse folders');
+    if (uiModule && uiModule.showError) uiModule.showError(t('workspace.browse_failed'));
   }
 }
 

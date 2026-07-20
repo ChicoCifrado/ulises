@@ -18,9 +18,20 @@ from pydantic import BaseModel, Field
 
 from services.memory.skills import SkillsManager
 from src.auth_helpers import get_current_user
+from core.translations import t
 from core.middleware import require_admin
 
 logger = logging.getLogger(__name__)
+
+# Last-resort verdict extraction from a teacher/verifier model's prose (run when
+# JSON parsing fails). `["\'\s:]*` already consumes whitespace, so the original
+# trailing `\s*` made two adjacent \s-matching quantifiers that backtrack O(n^2)
+# on a `verdict` + whitespace flood in untrusted model output (CodeQL
+# py/polynomial-redos). Without it a single unbounded quantifier remains — the
+# matched text is identical, and the scan is linear.
+_VERDICT_PROSE_RE = re.compile(
+    r'verdict["\'\s:]*["\']?(pass|needs_work|fail|inconclusive)', re.I
+)
 
 
 class SkillAddRequest(BaseModel):
@@ -196,7 +207,7 @@ async def _eval_skill_run(skill_md: str, task: str, transcript: str,
         # Last resort: pull the verdict keyword straight out of the prose so a
         # clearly-decided run isn't thrown away as "unparseable".
         if v not in _VERDICTS:
-            km = _re.search(r'verdict["\'\s:]*\s*["\']?(pass|needs_work|fail|inconclusive)', text, _re.I)
+            km = _VERDICT_PROSE_RE.search(text)
             if km:
                 v = km.group(1).lower()
                 if data is None:
@@ -604,12 +615,12 @@ def _audit_generic_blocker(skill: Optional[dict], necessity: Optional[dict],
     if isinstance(necessity, dict):
         reason = str(necessity.get("reason") or "")
         if necessity.get("necessary") is False and generic_re.search(reason):
-            return reason or "Generic or unnecessary skill"
+            return reason or t("skills.generic_or_unnecessary")
 
     if isinstance(skill, dict):
         tag_text = _audit_flag_text(skill.get("tags") or [])
         if generic_re.search(tag_text):
-            return "Skill is tagged generic"
+            return t("skills.generic_skill")
 
     if isinstance(verdict_data, dict):
         verdict_text = _audit_flag_text(
@@ -617,7 +628,7 @@ def _audit_generic_blocker(skill: Optional[dict], necessity: Optional[dict],
             verdict_data.get("issues") or [],
         )
         if generic_re.search(verdict_text):
-            return "Audit flagged the skill as generic or unnecessary"
+            return t("skills.audit_flagged")
     return None
 
 
@@ -1006,7 +1017,7 @@ def _resolve_audit_models(owner=None):
     from src.endpoint_resolver import resolve_endpoint
     url, model, headers = resolve_endpoint("utility", owner=owner)
     if not url or not model:
-        raise ValueError("No model configured — set a Default or Utility model in Settings.")
+        raise ValueError(t("skills.no_model_configured"))
     try:
         from src.llm_core import list_model_ids
         import os as _os
@@ -1065,7 +1076,7 @@ async def run_scheduled_skill_audit(skills_manager: SkillsManager,
         "status": "running", "scope": "scheduled", "model": model,
         "teacher": teacher[1] if teacher else None,
         "total": len(names), "done": 0, "current": None,
-        "results": [], "log": [f"Nightly audit of {len(names)} least-recently-checked skill(s) with {model}"
+        "results": [], "log": [t("skills.audit_nightly_log").format(count=len(names), model=model)
                                + (f"; teacher {teacher[1]}" if teacher else "")],
         "started": _time.time(), "cancel": False,
     }
@@ -1089,7 +1100,7 @@ def setup_skills_routes(skills_manager: SkillsManager) -> APIRouter:
         # field (legacy or un-stamped writes), since the truthiness guard
         # short-circuited the comparison. Treat missing owner as not-owned.
         if skill.get("owner") != user:
-            raise HTTPException(404, "Skill not found")
+            raise HTTPException(404, t("skills.not_found"))
 
     def _fire_skill_added(user: Optional[str]):
         try:
@@ -1194,7 +1205,7 @@ def setup_skills_routes(skills_manager: SkillsManager) -> APIRouter:
                 default = raw
                 break
         if default is None:
-            raise HTTPException(404, f"No built-in tool named {name!r}")
+            raise HTTPException(404, t("skills.no_builtin_tool").format(name=name))
         overrides = get_builtin_overrides()
         return {
             "name": name,
@@ -1214,11 +1225,11 @@ def setup_skills_routes(skills_manager: SkillsManager) -> APIRouter:
         for key in TOOL_SECTIONS:
             valid.update(key if isinstance(key, tuple) else (key,))
         if name not in valid:
-            raise HTTPException(404, f"No built-in tool named {name!r}")
+            raise HTTPException(404, t("skills.no_builtin_tool").format(name=name))
         body = await request.json()
         text = (body or {}).get("text", "")
         if not isinstance(text, str) or not text.strip():
-            raise HTTPException(400, "text is required")
+            raise HTTPException(400, t("skills.text_required"))
         from src.settings import get_setting, save_settings, load_settings
         settings = load_settings()
         ov = settings.get("builtin_tool_overrides")
@@ -1263,11 +1274,11 @@ def setup_skills_routes(skills_manager: SkillsManager) -> APIRouter:
             raise HTTPException(400, str(e)) from e
         except httpx.HTTPError as e:
             logger.warning("skill import fetch failed: %s", e)
-            detail = str(e).strip() or "Could not download skill from URL"
+            detail = str(e).strip() or t("skills.could_not_download")
             raise HTTPException(502, detail) from e
         except Exception as e:
             logger.error("skill import failed: %s", e)
-            raise HTTPException(500, "Skill import failed") from e
+            raise HTTPException(500, t("skills.import_failed")) from e
 
         _fire_skill_added(user)
         return {"ok": True, "skill": entry, "files": len(files)}
@@ -1325,12 +1336,12 @@ def setup_skills_routes(skills_manager: SkillsManager) -> APIRouter:
         }
         match = invokable.get(skill_id)
         if not match:
-            raise HTTPException(404, "Skill is not available for slash invocation")
+            raise HTTPException(404, t("skills.slash_unavailable"))
 
         name = match.get("name")
         md = skills_manager.read_skill_md(name, owner=user)
         if md is None:
-            raise HTTPException(404, "Skill source unavailable")
+            raise HTTPException(404, t("skills.source_unavailable"))
 
         skills_manager.record_use(name, owner=user)
         message = (
@@ -1353,7 +1364,7 @@ def setup_skills_routes(skills_manager: SkillsManager) -> APIRouter:
         for sk in skills:
             if sk.get("name") == skill_id or sk.get("id") == skill_id:
                 return sk
-        raise HTTPException(404, "Skill not found")
+        raise HTTPException(404, t("skills.not_found"))
 
     @router.get("/{skill_id}/markdown")
     async def get_skill_markdown(request: Request, skill_id: str):
@@ -1363,11 +1374,11 @@ def setup_skills_routes(skills_manager: SkillsManager) -> APIRouter:
         skills = skills_manager.load(owner=user)
         match = next((s for s in skills if s.get("name") == skill_id or s.get("id") == skill_id), None)
         if not match:
-            raise HTTPException(404, "Skill not found")
+            raise HTTPException(404, t("skills.not_found"))
         _verify_owner(match, user)
         md = skills_manager.read_skill_md(match.get("name"), owner=user)
         if md is None:
-            raise HTTPException(404, "Skill source unavailable (legacy entry?)")
+            raise HTTPException(404, t("skills.source_unavailable_legacy"))
         return {"name": match.get("name"), "markdown": md}
 
     @router.post("/{skill_id}/test")
@@ -1389,7 +1400,7 @@ def setup_skills_routes(skills_manager: SkillsManager) -> APIRouter:
         skills = skills_manager.load(owner=user)
         match = next((s for s in skills if s.get("name") == skill_id or s.get("id") == skill_id), None)
         if not match:
-            raise HTTPException(404, "Skill not found")
+            raise HTTPException(404, t("skills.not_found"))
         _verify_owner(match, user)
         name = match.get("name")
         md = skills_manager.read_skill_md(name, owner=user) or ""
@@ -1406,7 +1417,7 @@ def setup_skills_routes(skills_manager: SkillsManager) -> APIRouter:
             if headers is None and isinstance(body.get("headers"), dict):
                 headers = body.get("headers")
         if not url or not model:
-            raise HTTPException(400, "No model configured — set a Default or Utility model in Settings.")
+            raise HTTPException(400, t("skills.no_model_configured"))
 
         # Normalize against the endpoint's served models (avoids 404 model drift).
         try:
@@ -1513,13 +1524,13 @@ def setup_skills_routes(skills_manager: SkillsManager) -> APIRouter:
                 and not s.get("audit_verdict")
             ]
         if not names:
-            return {"ok": True, "status": "done", "total": 0, "results": [], "log": ["No skills to audit."]}
+            return {"ok": True, "status": "done", "total": 0, "results": [], "log": [t("skills.no_skills_to_audit")]}
 
         _skill_audit_jobs[key] = {
             "status": "running", "scope": scope, "model": model,
             "teacher": teacher[1] if teacher else None,
             "total": len(names), "done": 0, "current": None,
-            "results": [], "log": [f"Auditing {len(names)} skill(s) with {model}" + (f"; teacher {teacher[1]}" if teacher else "")],
+            "results": [], "log": [t("skills.audit_all_log").format(count=len(names), model=model) + (f"; teacher {teacher[1]}" if teacher else "")],
             "started": _time.time(), "cancel": False,
         }
         task = _asyncio.create_task(_run_audit_all_job(key, skills_manager, names, url, model, headers, teacher, user))
@@ -1561,16 +1572,16 @@ def setup_skills_routes(skills_manager: SkillsManager) -> APIRouter:
         body = await request.json()
         new_content = body.get("markdown")
         if not isinstance(new_content, str) or not new_content.strip():
-            raise HTTPException(400, "markdown is required")
+            raise HTTPException(400, t("skills.markdown_required"))
         skills = skills_manager.load(owner=user)
         match = next((s for s in skills if s.get("name") == skill_id or s.get("id") == skill_id), None)
         if not match:
-            raise HTTPException(404, "Skill not found")
+            raise HTTPException(404, t("skills.not_found"))
         _verify_owner(match, user)
         try:
             sk = Skill.from_markdown(new_content)
         except Exception as e:
-            raise HTTPException(400, f"Could not parse SKILL.md: {e}")
+            raise HTTPException(400, t("skills.could_not_parse_skill_md").format(e=e))
         # Never rename on save: a changed `name` in the markdown would move
         # the skill dir (update_skill) and orphan the original id, so a later
         # delete 404s (#1333). Pin to the stored name, like _apply_skill_md.
@@ -1598,7 +1609,7 @@ def setup_skills_routes(skills_manager: SkillsManager) -> APIRouter:
             "body_extra": sk.body_extra,
         }, owner=user)
         if not ok:
-            raise HTTPException(500, "Update failed")
+            raise HTTPException(500, t("skills.update_failed"))
         # Manual markdown edits can create or substantially rewrite a draft
         # skill without going through /add. Treat unaudited saves as new audit
         # candidates so the event-driven Skills Audit pipeline still runs.
@@ -1612,7 +1623,7 @@ def setup_skills_routes(skills_manager: SkillsManager) -> APIRouter:
         skills = skills_manager.load(owner=user)
         match = next((s for s in skills if s.get("name") == skill_id or s.get("id") == skill_id), None)
         if not match:
-            raise HTTPException(404, "Skill not found")
+            raise HTTPException(404, t("skills.not_found"))
         _verify_owner(match, user)
 
         updates = body.dict(exclude_none=True)
@@ -1620,7 +1631,7 @@ def setup_skills_routes(skills_manager: SkillsManager) -> APIRouter:
             return {"ok": True}
         ok = skills_manager.update_skill(match.get("name"), updates, owner=user)
         if not ok:
-            raise HTTPException(404, "Skill not found")
+            raise HTTPException(404, t("skills.not_found"))
         if not match.get("audit_verdict"):
             _fire_skill_added(user)
         return {"ok": True}
@@ -1631,11 +1642,11 @@ def setup_skills_routes(skills_manager: SkillsManager) -> APIRouter:
         skills = skills_manager.load(owner=user)
         match = next((s for s in skills if s.get("name") == skill_id or s.get("id") == skill_id), None)
         if not match:
-            raise HTTPException(404, "Skill not found")
+            raise HTTPException(404, t("skills.not_found"))
         _verify_owner(match, user)
         ok = skills_manager.delete_skill(match.get("name"), owner=user)
         if not ok:
-            raise HTTPException(404, "Skill not found")
+            raise HTTPException(404, t("skills.not_found"))
         return {"ok": True}
 
     @router.post("/search")
@@ -1643,7 +1654,7 @@ def setup_skills_routes(skills_manager: SkillsManager) -> APIRouter:
         body = await request.json()
         query = body.get("query", "")
         if not query.strip():
-            raise HTTPException(400, "query is required")
+            raise HTTPException(400, t("skills.query_required"))
         user = _owner(request)
         skills = skills_manager.load(owner=user)
         results = skills_manager.get_relevant_skills(query, skills, max_items=10)

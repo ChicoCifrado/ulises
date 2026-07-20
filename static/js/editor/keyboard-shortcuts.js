@@ -49,6 +49,7 @@
  *   uiModule:               object,
  * }} deps
  */
+import { t } from '../i18n.js';
 import { state } from './state.js';
 import { isAltGrEvent } from '../platform.js';
 
@@ -154,8 +155,8 @@ export function wireKeyboardShortcuts(deps) {
           tmp.toBlob(blob => {
             if (blob && navigator.clipboard?.write) {
               navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]).then(() => {
-                uiModule.showToast(isCut ? 'Cut to clipboard' : 'Copied to clipboard');
-              }).catch(() => uiModule.showToast(isCut ? 'Cut (editor only)' : 'Copied (editor only)'));
+                uiModule.showToast(isCut ? t('editor.cut_to_clipboard') : t('editor.copied_to_clipboard'));
+              }).catch(() => uiModule.showToast(isCut ? t('editor.cut_editor_only') : t('editor.copied_editor_only')));
             }
           }, 'image/png');
           if (isCut) {
@@ -197,8 +198,8 @@ export function wireKeyboardShortcuts(deps) {
         tmp.toBlob(blob => {
           if (blob && navigator.clipboard?.write) {
             navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]).then(() => {
-              uiModule.showToast(isCut ? 'Cut to clipboard' : 'Copied to clipboard');
-            }).catch(() => uiModule.showToast(isCut ? 'Cut (editor only)' : 'Copied (editor only)'));
+              uiModule.showToast(isCut ? t('editor.cut_to_clipboard') : t('editor.copied_to_clipboard'));
+            }).catch(() => uiModule.showToast(isCut ? t('editor.cut_editor_only') : t('editor.copied_editor_only')));
           }
         }, 'image/png');
         if (e.key === 'x') {
@@ -222,8 +223,8 @@ export function wireKeyboardShortcuts(deps) {
           layer.canvas.toBlob(blob => {
             if (blob && navigator.clipboard?.write) {
               navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
-                .then(() => uiModule.showToast('Layer copied to clipboard'))
-                .catch(() => uiModule.showToast('Copy failed (clipboard permission denied?)'));
+                .then(() => uiModule.showToast(t('editor.layer_copied_to_clipboard')))
+                .catch(() => uiModule.showToast(t('editor.copy_failed_permission_denied')));
             }
           }, 'image/png');
           return;
@@ -239,7 +240,7 @@ export function wireKeyboardShortcuts(deps) {
         state.lassoActive = false;
         composite();
         drawLassoOverlay();
-        uiModule.showToast('All selected — Ctrl+C to copy, Del to delete');
+        uiModule.showToast(t('editor.all_selected'));
       }
       // Ctrl+V handled by the paste event listener.
       if (e.key === 'v') { /* no-op here */ }

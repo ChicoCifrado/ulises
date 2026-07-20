@@ -1,0 +1,22 @@
+{
+  "shell": {
+    "admin_only": "Admin only",
+    "cross_site_rejected": "Cross-site request rejected",
+    "no_command": "No command provided",
+    "timed_out": "Command timed out after {timeout}s",
+    "no_package": "No package specified",
+    "unknown_package": "Unknown package: {name}",
+    "no_installable": "No installable packages requested (allowlist: cmake, build-essential, g++, gcc, git, tmux, make)",
+    "install_timed_out": "Install timed out after 180s",
+    "unsupported_engine": "Unsupported engine: {engine}",
+    "vllm_not_found": "vLLM CLI not found on PATH.",
+    "diffusers_needs_torch": "Diffusers serving needs both diffusers and torch.",
+    "pty_not_supported": "PTY streaming is not supported on this platform",
+    "invalid_ssh_port": "Invalid ssh_port",
+    "ssh_port_requires_host": "ssh_port requires host",
+    "rebuild_engine_timed_out": "Rebuild-engine command timed out.",
+    "docker_in_container_hint": "Local Docker daemon access is disabled inside the Ulises container; a Docker CLI alone is not enough. Default Docker Compose intentionally does not mount the host Docker socket. Raw socket access is high-trust and can grant broad control over the host Docker daemon. If you accept that risk, enable docker/host-docker.yml. Remote server Docker workflows over SSH remain preferred.",
+    "update_native_vllm": "Using a vLLM CLI on PATH without Python package metadata; update it outside Ulises.",
+    "update_native_llama_server": "Using native llama-server on PATH; update it with its package manager or source checkout."
+  }
+}

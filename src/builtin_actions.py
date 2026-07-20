@@ -14,6 +14,7 @@ from src.auth_helpers import owner_filter
 from core.platform_compat import IS_WINDOWS, find_bash
 from core.constants import internal_api_base
 from src.constants import DATA_DIR, DEEP_RESEARCH_DIR, TIDY_CALENDAR_STATE_FILE, EMAIL_URGENCY_CACHE_DIR, COOKBOOK_STATE_FILE
+from src.interactive_gate import wait_for_interactive_quiet
 
 logger = logging.getLogger(__name__)
 
@@ -145,6 +146,7 @@ async def action_consolidate_memory(owner: str, **kwargs) -> Tuple[str, bool]:
                     "\"drop\":[{\"id\":\"existing id\",\"reason\":\"short reason\"}]}\n\n"
                     f"MEMORIES:\n{json.dumps(items, ensure_ascii=False)}"
                 )
+                await wait_for_interactive_quiet("memory consolidation action")
                 raw = await llm_call_async_with_fallback(
                     candidates,
                     messages=[{"role": "user", "content": prompt}],
@@ -293,6 +295,11 @@ async def _run_subprocess(argv, *, shell: bool = False, timeout: int = 120, labe
     asyncio.to_thread so the event loop stays responsive."""
     import asyncio
     import subprocess
+    # Safety: prefer list form to avoid shell injection. When argv is a
+    # string it is wrapped in list form via bash -c unless shell=True is
+    # explicitly required (Windows edge case).
+    if isinstance(argv, str) and not shell:
+        argv = ["bash", "-c", argv]
     try:
         result = await asyncio.to_thread(
             subprocess.run, argv, shell=shell, capture_output=True, text=True, timeout=timeout,
@@ -312,11 +319,6 @@ async def action_ssh_command(owner: str, command: str = "", host: str = "localho
     if not command:
         return "No command specified", False
     if host in ("localhost", "127.0.0.1", "local"):
-        if IS_WINDOWS:
-            bash = find_bash()
-            if bash:
-                return await _run_subprocess([bash, "-c", command], timeout=120, label="Command")
-            return await _run_subprocess(command, shell=True, timeout=120, label="Command")
         return await _run_subprocess(["bash", "-c", command], timeout=120, label="Command")
     return await _run_subprocess(
         ["ssh", "-o", "ConnectTimeout=10", host, command], timeout=120, label="Command",
@@ -329,9 +331,7 @@ async def action_run_script(owner: str, script: str = "", host: str = "", **kwar
         return "No script specified", False
     target_host = (host or os.getenv("ULISES_SCRIPT_HOST", "localhost")).strip()
     if target_host in ("", "localhost", "127.0.0.1", "local"):
-        if IS_WINDOWS and find_bash():
-            return await _run_subprocess([find_bash(), "-c", script], timeout=300, label="Script")
-        return await _run_subprocess(script, shell=True, timeout=300, label="Script")
+        return await _run_subprocess(["bash", "-c", script], timeout=300, label="Script")
     return await _run_subprocess(["ssh", target_host, script], timeout=300, label="Script")
 
 
@@ -339,9 +339,7 @@ async def action_run_local(owner: str, script: str = "", **kwargs) -> Tuple[str,
     """Run a script locally (no SSH)."""
     if not script:
         return "No script specified", False
-    if IS_WINDOWS and find_bash():
-        return await _run_subprocess([find_bash(), "-c", script], timeout=300, label="Script")
-    return await _run_subprocess(script, shell=True, timeout=300, label="Script")
+    return await _run_subprocess(["bash", "-c", script], timeout=300, label="Script")
 
 
 async def action_tidy_research(owner: str, **kwargs) -> Tuple[str, bool]:
@@ -528,6 +526,21 @@ async def action_draft_email_replies(owner: str, **kwargs) -> Tuple[str, bool]:
         return str(e), False
 
 
+async def action_email_auto_translate(owner: str, **kwargs) -> Tuple[str, bool]:
+    """Placeholder for the opt-in email translation enrichment task.
+
+    The task is seeded paused so it is visible in Tasks while the detector,
+    cache, and on-demand translation path are built. Returning False makes a
+    manual run show a clear message instead of pretending work happened.
+    """
+    return (
+        "Email auto-translate is registered but not implemented yet. "
+        "Next step: detect foreign-language emails, cache translations by body hash, "
+        "and stream translated text in the email reader without replacing the original.",
+        False,
+    )
+
+
 _TYPE_COLORS = {
     "work":     "#5b8abf",  # blue
     "personal": "#a07ae0",  # purple
@@ -660,8 +673,8 @@ async def action_classify_events(owner: str, **kwargs) -> Tuple[str, bool]:
             # Persist heuristic results before LLM pass (in case LLM is slow/unavailable)
             try:
                 db.commit()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("db.commit before LLM pass failed: %s", e)
 
             # Pass 2: batch LLM classification (10 events per call)
             BATCH = 10
@@ -693,6 +706,7 @@ async def action_classify_events(owner: str, **kwargs) -> Tuple[str, bool]:
                     f"EVENTS: {_json.dumps(items)}"
                 )
                 try:
+                    await wait_for_interactive_quiet("calendar classification action")
                     raw = await llm_call_async_with_fallback(
                         llm_candidates,
                         messages=[{"role": "user", "content": prompt}],
@@ -835,7 +849,8 @@ async def action_learn_sender_signatures(owner: str, **kwargs) -> Tuple[str, boo
                             "uid": uid.decode() if isinstance(uid, bytes) else str(uid),
                             "from_address": from_addr,
                         })
-                    except Exception:
+                    except Exception as e:
+                        logger.debug("Email header parse failed: %s", e)
                         continue
             finally:
                 try: conn.logout()
@@ -909,7 +924,8 @@ async def action_learn_sender_signatures(owner: str, **kwargs) -> Tuple[str, boo
                                 continue
                             text = raw.decode("utf-8", errors="replace")
                             bodies.append(text[:4000])
-                        except Exception:
+                        except Exception as e:
+                            logger.debug("Email body fetch failed: %s", e)
                             continue
                 finally:
                     try: conn2.logout()
@@ -942,6 +958,7 @@ async def action_learn_sender_signatures(owner: str, **kwargs) -> Tuple[str, boo
             )
 
             try:
+                await wait_for_interactive_quiet("sender signature action")
                 raw = await llm_call_async_with_fallback(
                     candidates,
                     messages=[{"role": "user", "content": prompt}],
@@ -1079,7 +1096,7 @@ async def action_daily_brief(owner: str, **kwargs) -> Tuple[str, bool]:
                     for t in pending[:3]:
                         if t:
                             todo_lines.append(f"{n.title or 'Checklist'}: {t}")
-                except Exception:
+                except ValueError:
                     continue
             elif n.pinned and n.title:
                 todo_lines.append(n.title)
@@ -1342,10 +1359,8 @@ async def action_ping_notes(owner: str, **kwargs) -> Tuple[str, bool]:
         if _legacy.exists() and not STATE.exists():
             try:
                 STATE.write_text(_legacy.read_text(encoding="utf-8"), encoding="utf-8")
-            except Exception:
+            except OSError:
                 pass
-        # Scanner ticks every 60s in _note_pings_loop. 90s window guarantees
-        # every note's due time lands inside at least one tick's window.
         WINDOW_SEC = 90
         REPING_MIN = 25     # don't re-ping same note more often than this
 
@@ -1406,9 +1421,8 @@ async def action_ping_notes(owner: str, **kwargs) -> Tuple[str, bool]:
                             last_dt = last_dt.replace(tzinfo=_tz.utc)
                         if last_dt >= reping_cutoff:
                             continue
-                    except Exception:
+                    except (TypeError, ValueError):
                         pass
-                # Compose + dispatch.
                 title = (n.title or "Reminder").strip() or "Reminder"
                 body_parts = []
                 if n.content:
@@ -1424,9 +1438,8 @@ async def action_ping_notes(owner: str, **kwargs) -> Tuple[str, bool]:
                         ]
                         if pending:
                             body_parts.append("Pending:\n" + "\n".join(f"- {t}" for t in pending[:8]))
-                    except Exception:
+                    except ValueError:
                         pass
-                body = "\n\n".join(p for p in body_parts if p) or title
                 try:
                     from routes.note_routes import dispatch_reminder
                     await dispatch_reminder(
@@ -1679,6 +1692,7 @@ async def action_check_email_urgency(owner: str, **kwargs) -> Tuple[str, bool]:
                     f"Snippet:\n{item.get('body','')}\n"
                 )
                 try:
+                    await wait_for_interactive_quiet("email urgency action")
                     raw = await llm_call_async_with_fallback(
                         candidates,
                         [{"role": "user", "content": prompt}],
@@ -2175,6 +2189,8 @@ async def action_cookbook_serve(
             )
             if existing is None:
                 display_name = repo_id.split("/")[-1] if "/" in repo_id else repo_id
+                ssh_port = str(srv.get("port") or cfg.get("ssh_port") or "")
+                platform = str(srv.get("platform") or cfg.get("platform") or "linux")
                 placeholder = (
                     f"Launched by scheduled task {task_name!r} — waiting for tmux output…\n"
                     f"  session: {sid}\n"
@@ -2192,8 +2208,8 @@ async def action_cookbook_serve(
                     "ts": int(_time.time() * 1000),
                     "payload": {"repo_id": repo_id, "remote_host": host or "", "_cmd": cmd},
                     "remoteHost": host or "",
-                    "sshPort": "",
-                    "platform": "linux",
+                    "sshPort": ssh_port or "",
+                    "platform": platform or "linux",
                     "_serveReady": False,
                     "_endpointAdded": False,
                 }
@@ -2228,6 +2244,7 @@ BUILTIN_ACTIONS = {
     "tidy_research": action_tidy_research,
     "summarize_emails": action_summarize_emails,
     "draft_email_replies": action_draft_email_replies,
+    "email_auto_translate": action_email_auto_translate,
     "extract_email_events": action_extract_email_events,
     "classify_events": action_classify_events,
     # ping_events removed from the user-facing registry. Calendar reminders
@@ -2252,6 +2269,7 @@ BUILTIN_ACTION_INFO = {
     "tidy_research": "Remove orphaned research files (sessions that were deleted)",
     "summarize_emails": "Pre-generate AI summaries for new inbox emails",
     "draft_email_replies": "Pre-draft AI reply suggestions for new inbox emails",
+    "email_auto_translate": "Detect foreign-language emails and cache translated text for the email reader",
     "extract_email_events": "Scan emails for booking/meeting confirmations and auto-add to calendar",
     "classify_events": "Tag upcoming events with importance (low/normal/high/critical) and type (work/health/travel/etc.); colors them too",
     "daily_brief": "Build a morning digest: today's calendar, unread email count + top senders, active todos",

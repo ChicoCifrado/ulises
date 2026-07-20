@@ -28,6 +28,7 @@ import httpx
 from fastapi import HTTPException, Request
 
 from core.database import SessionLocal, ModelEndpoint
+from core.translations import t
 from routes.device_flow import (
     DeviceFlowPoll,
     DeviceFlowStart,
@@ -108,13 +109,13 @@ def _start_device_flow(request: Request, form) -> DeviceFlowStart:
         data = copilot.request_device_code(host)
     except httpx.HTTPStatusError as e:
         status = e.response.status_code if e.response is not None else "unknown"
-        raise HTTPException(502, f"GitHub device-code request failed (HTTP {status})")
+        raise HTTPException(502, t("copilot.device_code_failed").format(status=status))
     except Exception as e:
-        raise HTTPException(502, f"GitHub device-code request failed: {e}")
+        raise HTTPException(502, t("copilot.device_code_failed_with_error").format(error=e))
 
     device_code = data.get("device_code")
     if not device_code:
-        raise HTTPException(502, "GitHub did not return a device code")
+        raise HTTPException(502, t("copilot.no_device_code"))
 
     # verification_uri_complete embeds the user code, so the browser tab we
     # open lands the user straight on GitHub's "Authorize" screen with the
@@ -149,7 +150,7 @@ def _poll_device_flow(_request: Request, pending: Dict) -> DeviceFlowPoll:
             result = _provision_endpoint(token, base, pending["owner"])
         except Exception as e:
             logger.exception("Copilot endpoint provisioning failed")
-            raise HTTPException(500, f"Login succeeded but provisioning failed: {e}")
+            raise HTTPException(500, t("copilot.provisioning_failed").format(error=e))
         return DeviceFlowPoll.authorized(result)
 
     err = data.get("error")

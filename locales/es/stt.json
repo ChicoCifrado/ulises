@@ -1,0 +1,7 @@
+{
+  "stt": {
+    "unavailable": "El servicio STT no está disponible o está configurado en modo navegador",
+    "empty_audio": "Archivo de audio vacío",
+    "transcription_failed": "Error en la transcripción"
+  }
+}

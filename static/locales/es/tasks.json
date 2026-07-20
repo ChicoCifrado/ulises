@@ -1,0 +1,6 @@
+{
+  "tasks": {
+    "not_found": "Tarea no encontrada",
+    "not_assistant_task": "No es una tarea de asistente"
+  }
+}

@@ -7,6 +7,7 @@ import {
   ICON_PLAY, ICON_CODE, SEND_SVG,
 } from './icons.js';
 import { _clearProbeWaves } from './probe.js';
+import { t } from '../i18n.js';
 import Storage from '../storage.js';
 import uiModule from '../ui.js';
 import spinnerModule from '../spinner.js';
@@ -269,7 +270,7 @@ async function copyPaneResponse(paneIdx) {
     ta.value = text; document.body.appendChild(ta); ta.select();
     document.execCommand('copy'); ta.remove();
   }
-  if (uiModule) uiModule.showToast(lastAi._imageData ? 'Prompt copied!' : 'Copied!');
+  if (uiModule) uiModule.showToast(lastAi._imageData ? t('compare.prompt_copied') : t('common.copied'));
 }
 
 // ── Add / create / remove panes ──

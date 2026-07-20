@@ -1,0 +1,11 @@
+{
+  "rag": {
+    "collection_not_initialized": "Colección no inicializada",
+    "empty_document_list": "Lista de documentos vacía",
+    "no_valid_documents": "No hay documentos válidos",
+    "no_embedding_accepted": "Ningún carril de embedding aceptó el lote",
+    "no_docs_found": "No se encontraron documentos",
+    "removed_chunks": "{count} fragmentos eliminados",
+    "no_owner_rename_needed": "No es necesario renombrar el propietario"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "vault": {
+    "bw_not_installed": "bw CLI not installed (install `nodejs-bitwarden-cli` or `bitwarden-cli`)",
+    "launch_failed": "Failed to launch bw: {error}",
+    "config_failed": "bw config failed: {error}",
+    "login_failed": "Login failed: {error}",
+    "unlock_failed": "Unlock failed: {error}",
+    "empty_session": "bw returned empty session",
+    "unlocked": "Vault unlocked",
+    "locked": "Vault locked"
+  }
+}

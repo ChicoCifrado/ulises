@@ -8,6 +8,8 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 import logging
 
+from core.translations import t
+
 logger = logging.getLogger(__name__)
 
 class TTSRequest(BaseModel):
@@ -34,7 +36,7 @@ def setup_tts_routes(tts_service):
             if not tts_service.available:
                 raise HTTPException(
                     status_code=503,
-                    detail={"message": "TTS service not available"}
+                    detail={"message": t("tts.unavailable")}
                 )
             
             if request.format == "base64":
@@ -42,7 +44,7 @@ def setup_tts_routes(tts_service):
                 if not audio_b64:
                     raise HTTPException(
                         status_code=500,
-                        detail={"message": "Synthesis failed"}
+                        detail={"message": t("tts.synthesis_failed")}
                     )
                 return {"audio": audio_b64}
             
@@ -51,7 +53,7 @@ def setup_tts_routes(tts_service):
                 if not audio_data:
                     raise HTTPException(
                         status_code=500,
-                        detail={"message": "Synthesis failed"}
+                        detail={"message": t("tts.synthesis_failed")}
                     )
                 
                 # Detect format from magic bytes (MP3: ID3 tag or sync word ff e0+)
@@ -71,7 +73,7 @@ def setup_tts_routes(tts_service):
             logger.error(f"Synthesis error: {e}", exc_info=True)
             raise HTTPException(
                 status_code=500,
-                detail={"message": f"Synthesis failed: {str(e)}"}
+                detail={"message": t("tts.synthesis_failed_with_error").format(error=str(e))}
             )
 
     @router.post("/clear-cache")

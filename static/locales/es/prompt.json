@@ -1,0 +1,49 @@
+{
+  "prompt": {
+    "title": "Prompt",
+    "aria_label": "Prompt",
+    "close_aria": "Cerrar prompt",
+    "tabs": {
+      "inject": "Inyectar",
+      "persona": "Persona",
+      "group": "Grupo"
+    },
+    "inject": {
+      "prefix": "Prefijo",
+      "prefix_placeholder": "Se agrega antes de tu mensaje",
+      "suffix": "Sufijo",
+      "suffix_placeholder": "Se agrega después de tu mensaje",
+      "temperature": "Temperatura",
+      "temperature_tip": "Controla la aleatoriedad. Valores bajos dan respuestas enfocadas y deterministas (buenas para código). Valores altos dan respuestas más creativas y variadas.",
+      "precise": "Preciso / Código",
+      "balanced": "Equilibrado",
+      "creative": "Creativo",
+      "max_tokens": "Máx. de tokens",
+      "max_tokens_tip": "Longitud máxima de la respuesta de la IA. 'Sin límite' permite que el modelo decida cuándo detenerse.",
+      "no_limit": "Sin límite"
+    },
+    "persona": {
+      "label": "Persona",
+      "select_placeholder": "Seleccionar persona...",
+      "new": "+ Nueva",
+      "name": "Nombre",
+      "name_placeholder": "Dale un nombre a tu persona...",
+      "delete_title": "Eliminar esta persona y sus recuerdos",
+      "delete": "Eliminar",
+      "reset_title": "Restablecer valores predeterminados",
+      "reset": "↺ Restablecer",
+      "system_prompt": "System prompt",
+      "prompt_placeholder": "Escribe notas preliminares y haz clic en Expandir, o déjalo vacío",
+      "expand_title": "AI expand — convierte tus notas en un system prompt completo",
+      "expand": "Expandir"
+    },
+    "group": {
+      "sequential": "Secuencial",
+      "add_participant": "+ Agregar participante"
+    },
+    "footer": {
+      "cancel": "Cancelar",
+      "start": "Iniciar"
+    }
+  }
+}

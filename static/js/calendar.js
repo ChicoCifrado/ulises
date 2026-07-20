@@ -12,12 +12,12 @@ import {
   WEEKDAYS, WEEKDAYS_SUN, MONTHS, MON_SHORT,
   CAL_PALETTE, CAL_COLORS, _CAL_CUSTOM_GRADIENT, _TYPE_PALETTE,
   _trashIcon, _moreIcon, _bellIcon,
-  _isCalBgImage, _calBgImageUrl, _calBgCss,
+  _isCalBgImage, _calBgImageUrl, _calBgCss, _cssUrlEscape,
   _calReadableTextColor,
   _ds, _addDays, _shiftDT, _tzOffset, _localDateOf,
 } from './calendar/utils.js';
-
-const API_BASE = window.location.origin;
+import { API_BASE } from './apiBase.js';
+import { t } from './i18n.js';
 // Open a file picker, upload the chosen image, return the URL string.
 function _pickCalBgImage() {
   return new Promise(resolve => {
@@ -85,7 +85,7 @@ function _showCalUndoToast(label, undoFn) {
   _pushCalUndo({ label, run: undoFn });
   const isMac = /Mac|iPhone|iPad/.test(navigator.platform || '') || /Mac/.test(navigator.userAgent || '');
   uiModule.showToast(label, {
-    action: 'Undo',
+    action: t('calendar.undo'),
     actionHint: isMac ? '⌘Z' : 'Ctrl+Z',
     duration: 6000,
     onAction: _popAndRunCalUndo,
@@ -266,7 +266,7 @@ async function _createEvent(data) {
   }).catch((e) => {
     delete _allEvents[tempUid];
     if (_open) _render();
-    if (window.uiModule) window.uiModule.showError('Failed to create event: ' + (e?.message || 'unknown'));
+    if (window.uiModule) window.uiModule.showError(t('calendar.create_event_failed', { error: e?.message || 'unknown' }));
   });
   return { uid: tempUid };
 }
@@ -295,7 +295,7 @@ async function _updateEvent(uid, data) {
     if (_preMergeBackup) _allEvents[uid] = _preMergeBackup;
     else delete _allEvents[uid];
     if (_open) _render();
-    if (window.uiModule) window.uiModule.showError('Failed to update event: ' + (e?.message || 'unknown'));
+    if (window.uiModule) window.uiModule.showError(t('calendar.update_event_failed', { error: e?.message || 'unknown' }));
   });
   return { ok: true };
 }
@@ -347,7 +347,7 @@ async function _deleteEvent(uid) {
       _allEvents[k] = ev;
       if (Array.isArray(_events)) _events.push(ev);
     }
-    if (window.uiModule) window.uiModule.showError('Failed to delete event: ' + (e?.message || 'unknown'));
+    if (window.uiModule) window.uiModule.showError(t('calendar.delete_event_failed', { error: e?.message || 'unknown' }));
     if (_open) _render();
   });
   return { ok: true };
@@ -413,8 +413,8 @@ function _calEventFg(ev) {
 // Returns '' for normal solid-color events.
 function _calItemBgStyle(ev) {
   if (!_isCalBgImage(ev.color)) return '';
-  const url = _calBgImageUrl(ev.color).replace(/'/g, "\\'").replace(/"/g, "%22");
-  return `background-image: linear-gradient(color-mix(in srgb, var(--bg) 70%, transparent), color-mix(in srgb, var(--bg) 70%, transparent)), url('${url}'); background-size: cover; background-position: center;`;
+  const url = _calBgImageUrl(ev.color);
+  return `background-image: linear-gradient(color-mix(in srgb, var(--bg) 70%, transparent), color-mix(in srgb, var(--bg) 70%, transparent)), url('${_cssUrlEscape(url)}'); background-size: cover; background-position: center;`;
 }
 
 function _todayCount() {
@@ -487,10 +487,10 @@ function _showEventMoreMenu(ev, anchor) {
     _showEventForm(ev);
   }));
 
-  dropdown.appendChild(_item(_trashIcon, 'Delete', async () => {
+  dropdown.appendChild(_item(_trashIcon, t('calendar.delete'), async () => {
     closeMenu();
-    const name = ev.summary ? `"${ev.summary}"` : 'this event';
-    const ok = await uiModule.styledConfirm(`Delete ${name}?`, { confirmText: 'Delete', danger: true });
+    const name = ev.summary ? `"${ev.summary}"` : t('calendar.this_event');
+    const ok = await uiModule.styledConfirm(t('calendar.delete_confirm', { name }), { confirmText: t('common.delete'), danger: true });
     if (!ok) return;
     try { await _deleteEvent(ev.uid); setTimeout(() => _render(), 100); } catch (_) {}
   }, true));
@@ -515,11 +515,11 @@ async function _createEventReminder(ev, dueDate) {
   const startFmt = ev.all_day
     ? new Date(ev.dtstart).toLocaleDateString([], { weekday:'short', month:'short', day:'numeric' })
     : new Date(ev.dtstart).toLocaleString([], { weekday:'short', month:'short', day:'numeric', hour:'numeric', minute:'2-digit' });
-  const summary = ev.summary || '(no title)';
+  const summary = ev.summary || t('calendar.no_title');
   const loc = ev.location ? ` @ ${ev.location}` : '';
   const text = `${summary}${loc} — ${startFmt}`;
   const payload = {
-    title: `Reminder: ${summary}`,
+    title: t('calendar.reminder_title', { summary }),
     note_type: 'todo',
     items: [{ text, done: false, checked: false }],
     label: 'calendar',
@@ -538,13 +538,13 @@ async function _createEventReminder(ev, dueDate) {
     });
     if (!res.ok) throw new Error('Failed');
     const fmt = dueDate.toLocaleString([], { month:'short', day:'numeric', hour:'numeric', minute:'2-digit' });
-    if (uiModule.showToast) uiModule.showToast(`Reminder set for ${fmt}`);
+    if (uiModule.showToast) uiModule.showToast(t('calendar.reminder_set', { time: fmt }));
     try { window.notesModule?.refreshDueBadge?.({ force: true }); } catch {}
     if ('Notification' in window && Notification.permission === 'default') {
       try { Notification.requestPermission(); } catch {}
     }
   } catch (e) {
-    if (uiModule.showError) uiModule.showError('Failed to create reminder');
+    if (uiModule.showError) uiModule.showError(t('calendar.reminder_create_failed'));
   }
 }
 
@@ -1260,8 +1260,8 @@ async function _renderWeek() {
       // events keep the original tinted treatment.
       let bgDecl;
       if (_isCalBgImage(ev.color)) {
-        const _url = _calBgImageUrl(ev.color).replace(/'/g, "\\'").replace(/"/g, "%22");
-        bgDecl = `background-image: linear-gradient(color-mix(in srgb, var(--bg) 55%, transparent), color-mix(in srgb, var(--bg) 55%, transparent)), url('${_url}'); background-size: cover; background-position: center;`;
+        const _url = _calBgImageUrl(ev.color);
+        bgDecl = `background-image: linear-gradient(color-mix(in srgb, var(--bg) 55%, transparent), color-mix(in srgb, var(--bg) 55%, transparent)), url('${_cssUrlEscape(_url)}'); background-size: cover; background-position: center;`;
       } else {
         bgDecl = `background:color-mix(in srgb, ${_calColor(ev)} 18%, var(--bg));`;
       }
@@ -1974,7 +1974,7 @@ function _wireAll(body) {
         const data = await res.json().catch(() => ({}));
         if (!res.ok || !data.ok) {
           if (_qaStatus) _qaStatus.textContent = '';
-          uiModule.showError('Quick-add: ' + (data.error || data.detail || `HTTP ${res.status}`));
+          uiModule.showError(t('calendar.quick_add_error', { detail: data.error || data.detail || `HTTP ${res.status}` }));
           return;
         }
         // Open the bespoke event form, then push the parsed fields in.
@@ -2007,7 +2007,7 @@ function _wireAll(body) {
         // Reset for next quick add.
         _qaInput.value = '';
       } catch (e) {
-        uiModule.showError('Quick-add failed: ' + e.message);
+        uiModule.showError(t('calendar.quick_add_failed', { error: e.message }));
       } finally {
         _qaSubmitting = false;
         clearTimeout(_qaSpinTimer);
@@ -2166,7 +2166,7 @@ function _wireAll(body) {
         window._calSyncDone = false;
         if (_open) _render();
       }, 900);
-      if (uiModule?.showToast) uiModule.showToast('Calendar refreshed');
+      if (uiModule?.showToast) uiModule.showToast(t('calendar.refreshed'));
     }
   });
   // Brief spin on the "+" glyph before the new-event form opens. The
@@ -2572,7 +2572,7 @@ async function _showCalSettings() {
       }, 30);
     } catch (err) {
       btn.disabled = false;
-      if (window.showError) window.showError(err.message || 'Failed to create calendar');
+      if (window.showError) window.showError(err.message || t('calendar.create_calendar_failed'));
       else console.error(err);
     }
   });
@@ -2589,7 +2589,7 @@ async function _showCalSettings() {
       clearTimeout(saveTimer);
       saveTimer = setTimeout(async () => {
         await fetch(`${API_BASE}/api/calendar/calendars/${id}?name=${encodeURIComponent(nameInput.value)}&color=${encodeURIComponent(colorInput.value)}`, { method: 'PUT' });
-        if (uiModule?.showToast) uiModule.showToast(`Saved “${nameInput.value || 'calendar'}”`);
+        if (uiModule?.showToast) uiModule.showToast(t('calendar.saved', { name: nameInput.value || t('calendar.default_name') }));
         // Update local calendar list
         const c = _calendars.find(c => c.href === id);
         if (c) { c.name = nameInput.value; c.color = colorInput.value; }
@@ -2612,7 +2612,7 @@ async function _showCalSettings() {
 
     delBtn.addEventListener('click', async () => {
       const name = nameInput.value;
-      if (!await window.styledConfirm(`Delete calendar "${name}" and all its events?`, { confirmText: 'Delete', danger: true })) return;
+      if (!await window.styledConfirm(t('calendar.delete_calendar_confirm', { name }), { confirmText: t('common.delete'), danger: true })) return;
       await fetch(`${API_BASE}/api/calendar/calendars/${id}`, { method: 'DELETE' });
       row.remove();
       _allEvents = {}; _fetchedRanges = []; localStorage.removeItem(LS_KEY);
@@ -2853,7 +2853,7 @@ function _showEventForm(existing, defaultDate, defaultEndDate) {
             let bg;
             if (isCustom) {
               const url = _calBgImageUrl(cur);
-              bg = url ? `center/cover no-repeat url('${url}')` : _CAL_CUSTOM_GRADIENT;
+              bg = url ? `center/cover no-repeat url('${_cssUrlEscape(url)}')` : _CAL_CUSTOM_GRADIENT;
             } else {
               bg = c.hex || 'var(--border)';
             }
@@ -2928,7 +2928,7 @@ function _showEventForm(existing, defaultDate, defaultEndDate) {
       // stays readable. Chrome accent falls back to the theme accent.
       const url = _calBgImageUrl(hex);
       _formCard.style.setProperty('--ev-color', 'var(--accent)');
-      _formCard.style.backgroundImage = `linear-gradient(color-mix(in srgb, var(--panel) 65%, transparent), color-mix(in srgb, var(--panel) 65%, transparent)), url('${url.replace(/'/g, "\\'")}')`;
+      _formCard.style.backgroundImage = `linear-gradient(color-mix(in srgb, var(--panel) 65%, transparent), color-mix(in srgb, var(--panel) 65%, transparent)), url('${_cssUrlEscape(url)}')`;
       _formCard.style.backgroundSize = 'cover';
       _formCard.style.backgroundPosition = 'center';
       _formCard.classList.add('cal-form-bg-image');
@@ -2950,7 +2950,7 @@ function _showEventForm(existing, defaultDate, defaultEndDate) {
         if (!url) return;
         const sentinel = 'bg:' + url;
         dot.dataset.color = sentinel;
-        dot.style.background = `center/cover no-repeat url('${url}')`;
+        dot.style.background = `center/cover no-repeat url('${_cssUrlEscape(url)}')`;
         document.querySelectorAll('#cal-f-colors .note-color-dot').forEach(d => d.classList.remove('active'));
         dot.classList.add('active');
         _applyFormTint(sentinel);
@@ -3067,7 +3067,7 @@ function _showEventForm(existing, defaultDate, defaultEndDate) {
   document.getElementById('cal-form-mobile-cancel')?.addEventListener('click', _cancelEventForm);
   document.getElementById('cal-f-save')?.addEventListener('click', async () => {
     const summary = document.getElementById('cal-f-sum').value.trim();
-    if (!summary) { uiModule.showToast('Title required'); return; }
+    if (!summary) { uiModule.showToast(t('calendar.title_required')); return; }
     const dv = document.getElementById('cal-f-date').value;
     const dvEnd = document.getElementById('cal-f-date-end').value || dv;
     const isAD = document.getElementById('cal-f-allday').checked;
@@ -3103,7 +3103,7 @@ function _showEventForm(existing, defaultDate, defaultEndDate) {
       const endDt = new Date(`${dvEnd}T${endVal}:00`);
 
       if (endDt <= startDt) {
-        uiModule.showToast('End time must be after start time');
+        uiModule.showToast(t('calendar.end_after_start'));
         return;
       }
     }
@@ -3138,14 +3138,14 @@ function _showEventForm(existing, defaultDate, defaultEndDate) {
         }
       }
       _selectedDay = dv; _render();
-    } catch (e) { uiModule.showToast('Failed to save'); }
+    } catch (e) { uiModule.showToast(t('calendar.save_failed')); }
   });
   document.getElementById('cal-f-del')?.addEventListener('click', async () => {
-    const name = existing && existing.summary ? `"${existing.summary}"` : 'this event';
-    const ok = await uiModule.styledConfirm(`Delete ${name}?`, { confirmText: 'Delete', danger: true });
+    const name = existing && existing.summary ? `"${existing.summary}"` : t('calendar.this_event');
+    const ok = await uiModule.styledConfirm(t('calendar.delete_confirm', { name }), { confirmText: t('common.delete'), danger: true });
     if (!ok) return;
     try { await _deleteEvent(existing.uid); _render(); }
-    catch (e) { uiModule.showToast('Failed to delete'); }
+    catch (e) { uiModule.showToast(t('calendar.delete_failed')); }
   });
   // ── Bespoke-form behavior ──────────────────────────────────────────
   const formEl = body.querySelector('.cal-form');

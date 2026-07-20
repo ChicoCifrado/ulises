@@ -1,0 +1,41 @@
+{
+  "cookbook": {
+    "diffusers_no_torch": "El servicio de difusión requiere PyTorch y diffusers.",
+    "model_gated": "El acceso al modelo está restringido o no autorizado.",
+    "traceback_detected": "Se detectó un traceback de Python durante el inicio del servicio.",
+    "ssh_key_failed": "Error al generar la clave SSH",
+    "setup_timed_out": "Tiempo de configuración agotado (120s)",
+    "no_gpu_probe": "No hay sonda de memoria GPU disponible",
+    "pid_not_running": "El PID {pid} no está en ejecución",
+    "kill_returned": "kill devolvió {code}",
+    "kill_timed_out": "El comando kill agotó el tiempo de espera",
+    "hf_api_error": "API de HF HTTP {code}",
+    "hf_api_failed": "Error en la solicitud a la API de HF",
+    "repo_format": "el repositorio debe ser <org>/<model>",
+    "http_status": "HTTP {status}",
+    "yaml_parse_failed": "error al analizar YAML: {error}",
+    "diagnosis": {
+      "no_gpu_memory": "No hay suficiente memoria GPU libre para cargar el modelo.",
+      "gpu_oom": "La GPU se quedó sin memoria al cargar el modelo.",
+      "tp_incompatible": "La configuración de parallelismo de tensores es incompatible con el modelo.",
+      "context_too_large": "La ventana de contexto es demasiado grande para la memoria GPU disponible.",
+      "auto_tool_choice": "El modelo no soporta selección automática de herramientas.",
+      "custom_code_needed": "El modelo requiere la bandera --trust-remote-code.",
+      "modelopt_quant": "Cuantización ModelOpt LM-head detectada. Usa el script de conversión de vLLM.",
+      "kernel_mismatch": "Discrepancia de kernel CUDA — intenta reconstruir o actualizar el paquete del kernel.",
+      "port_in_use": "El puerto ya está en uso por otro proceso.",
+      "no_gpus_visible": "No hay GPUs visibles para el contenedor o proceso.",
+      "unsupported_gpu": "La arquitectura de GPU no es compatible con esta compilación.",
+      "vllm_not_installed": "vLLM no está instalado. Instálalo con pip install vllm.",
+      "sglang_deps_missing": "Faltan dependencias nativas de SGLang. Instala libnuma-dev, python3-dev y sglang-kernel.",
+      "sglang_not_installed": "SGLang no está instalado.",
+      "cmake_missing": "Se requiere CMake pero no se encuentra en PATH.",
+      "compiler_missing": "Se requiere un compilador C/C++ (gcc/clang) pero no se encuentra.",
+      "git_missing": "Se requiere Git pero no se encuentra en PATH.",
+      "llamacpp_deps_missing": "Faltan dependencias de llama.cpp.",
+      "no_gguf_found": "No se encontró un modelo GGUF que coincida con el nombre o ruta solicitados.",
+      "diffusion_deps_missing": "Faltan dependencias de difusión.",
+      "model_access_denied": "El acceso al modelo solicitado está denegado o el modelo no existe."
+    }
+  }
+}

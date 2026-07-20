@@ -1,0 +1,94 @@
+{
+  "chat": {
+    "title": "Ulises Chat",
+    "page_titles": {
+      "default": "Ulises Chat",
+      "calendar": "Calendar — Ulises",
+      "notes": "Notes — Ulises",
+      "cookbook": "Cookbook — Ulises",
+      "email": "Email — Ulises",
+      "memory": "Memory — Ulises",
+      "gallery": "Gallery — Ulises",
+      "tasks": "Tasks — Ulises",
+      "library": "Library — Ulises"
+    },
+    "welcome": "Welcome, ",
+    "welcome_setup": "type /setup",
+    "welcome_setup_title": "Click to launch setup",
+    "nobody_mode_title": "Enable Nobody mode — no memory, no history saved",
+    "nobody": "Nobody",
+    "placeholder": "Message Ulises...",
+    "aria_label": "Message input",
+    "send_btn": "+ New",
+    "send_aria": "New chat",
+    "agent_mode": "Agent",
+    "chat_mode": "Chat",
+    "scroll_to_bottom": "Scroll to bottom",
+    "context_compacted": "Context compacted — older messages summarized",
+    "message_deleted": "Message deleted",
+    "message_edited": "Message edited",
+    "forked": "Forked → {{name}}",
+    "model_failed_fallback": "⚠ {{failed}} failed — answered by {{fallback}}",
+    "tips": {
+      "desktop": [
+        "Tip: Press Ctrl+K to search across all your conversations.",
+        "Tip: Press Ctrl+B to quickly toggle the sidebar.",
+        "Tip: Shift-click the sidebar toggle to swap it to the other side.",
+        "Tip: Drag and drop files onto the chat to attach them.",
+        "Tip: Right-click a session for rename, delete, and memory options."
+      ],
+      "phone": [
+        "Tip: Long-press a session for rename, delete, and memory options.",
+        "Tip: Tap the eye icon for Nobody mode — no history saved.",
+        "Tip: Switch to Agent mode for web search and code execution.",
+        "Tip: Use Compare mode to test different models side by side.",
+        "Tip: Attach images or files using the + button next to the input."
+      ],
+      "setup": "Type /setup, then choose Local models or API."
+    },
+    "overflow_menu": {
+      "title": "More tools",
+      "attach_files": "Attach files",
+      "documents": "Documents",
+      "rag": "RAG",
+      "workspace": "Workspace",
+      "tts": "TTS Mode",
+      "prompt": "Prompt"
+    },
+    "tool_indicators": {
+      "web_search": "Web search",
+      "shell": "Shell Access",
+      "workspace_title": "Workspace — click to clear",
+      "workspace_clear": "Clear workspace",
+      "rag_title": "RAG active — click to deactivate",
+      "rag_label": "RAG",
+      "research_title": "Deep Research active — click to deactivate",
+      "research_label": "Research",
+      "group_title": "Group Chat active — click to deactivate",
+      "group_label": "Group",
+      "persona_title": "Persona active — click to deactivate",
+      "compare_title": "Compare active — click to deactivate",
+      "compare_label": "Compare"
+    },
+    "model_picker": {
+      "switch": "Switch model",
+      "select": "Select model",
+      "search_placeholder": "Search models...",
+      "search_aria": "Search models",
+      "refresh": "Refresh model picker",
+      "add_endpoints": "Add model endpoints",
+      "no_model": "No model selected for this chat. Open the model picker and choose one before sending.",
+      "model_removed": "Selected model endpoint was removed. Pick another model in Settings."
+    },
+    "errors": {
+      "session_not_found": "Session '{{name}}' not found",
+      "session_not_found_generic": "Session not found",
+      "invalid_json": "Invalid JSON: {{error}}",
+      "invalid_request": "Invalid request parameters",
+      "no_active_run": "No active run for this session",
+      "no_active_stream": "No active stream for this session",
+      "image_gen_disabled": "Image generation is disabled by the administrator.",
+      "tool_blocked": "Tool blocked by policy"
+    }
+  }
+}

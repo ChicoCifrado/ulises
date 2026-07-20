@@ -16,6 +16,7 @@
 // BUILTIN_ACTIONS + src/cookbook_serve_lifecycle.py + its
 // registration line in app.py.
 
+import { t } from './i18n.js';
 try { (function () {
   function _safe(fn) {
     return function () {
@@ -170,7 +171,7 @@ try { (function () {
       || arrowBtn.parentElement?.parentElement
       || arrowBtn.parentElement;
     if (!anchor) {
-      toast("Couldn't find a panel to mount the schedule form");
+      toast(t('cookbookSchedule.couldNotFindPanel'));
       return;
     }
     // Toggle.
@@ -284,7 +285,7 @@ try { (function () {
           fail(data.error || data.detail || `HTTP ${r.status}`);
           saveBtn.disabled = false;
           saveBtn.textContent = "Save schedule";
-          toast(`Schedule save failed: ${data.error || data.detail || r.status}`);
+          toast(t('cookbookSchedule.saveFailed', { error: data.error || data.detail || r.status }));
           return;
         }
         if (mirrorToCalendar) {
@@ -361,7 +362,7 @@ try { (function () {
         }
         form.remove();
         const newTaskId = data.id || data.task_id || "";
-        toast(`Created task: Serve: ${fullName}`, {
+        toast(t('cookbookSchedule.createdTask', { fullName }), {
           leadingIcon: "check",
           action: "Open",
           duration: 5000,
@@ -371,7 +372,7 @@ try { (function () {
         fail(String(e));
         saveBtn.disabled = false;
         saveBtn.textContent = "Save schedule";
-        toast(`Schedule save failed: ${e}`);
+        toast(t('cookbookSchedule.saveFailed', { error: e }));
       }
     }));
   }

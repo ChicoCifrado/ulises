@@ -8,6 +8,7 @@ import { clearDockSide } from './modalSnap.js';
 import { sortModelIds } from './modelSort.js';
 import { providerLogo } from './providers.js';
 import { isAltGrEvent } from './platform.js';
+import { t, setLanguage, getCurrentLang } from './i18n.js';
 
 let initialized = false;
 let modalEl = null;
@@ -541,6 +542,9 @@ async function initDefaultChat() {
     renderFallbacks();
   } catch (e) { console.warn('Failed to load default chat settings', e); }
 
+  epSel.addEventListener('change', function() { refreshModels(''); saveDefault(); });
+  modelSel.addEventListener('change', saveDefault);
+
   async function saveDefault() {
     try {
       var clean = _fallbacks.filter(function(f) { return f.endpoint_id && f.model; });
@@ -557,8 +561,6 @@ async function initDefaultChat() {
     } catch (e) { msg.textContent = 'Failed to save'; msg.style.color = 'var(--red)'; }
   }
 
-  epSel.addEventListener('change', function() { refreshModels(''); saveDefault(); });
-  modelSel.addEventListener('change', saveDefault);
   if (addFbBtn) addFbBtn.addEventListener('click', function() {
     var first = enabledEndpoints()[0];
     _fallbacks.push({ endpoint_id: first ? first.id : '', model: '' });
@@ -2358,6 +2360,7 @@ function initAll() {
   initEmailAccountsSettings();
   initReminderSettings();
   initUnifiedIntegrations();
+  initLanguageSettings();
 }
 
 function notifyIntegrationsChanged() {
@@ -2827,6 +2830,33 @@ async function initReminderSettings() {
       }
     });
   }
+}
+
+function initLanguageSettings() {
+  const sel = document.getElementById('set-app-language');
+  if (!sel || sel.dataset.bound === '1') return;
+  sel.dataset.bound = '1';
+
+  fetch('/api/prefs/app_language', { credentials: 'same-origin' })
+    .then(r => r.json())
+    .then(data => {
+      if (data.value) {
+        sel.value = data.value;
+        setLanguage(data.value).catch(() => {});
+      }
+    })
+    .catch(() => {});
+
+  sel.addEventListener('change', () => {
+    const lang = sel.value;
+    setLanguage(lang).catch(() => {});
+    fetch('/api/prefs/app_language', {
+      method: 'PUT',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ value: lang }),
+    }).catch(() => {});
+  });
 }
 
 async function initEmailAccountsSettings() {

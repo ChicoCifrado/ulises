@@ -1,0 +1,23 @@
+{
+  "mcp": {
+    "auth_successful": "Authorization Successful",
+    "auth_connecting": "The MTP server is connecting. You can close this window and return to Ulises.",
+    "error": "Error",
+    "no_auth_code": "No authorization code found in the URL. Make sure you copied the full URL from your browser.",
+    "invalid_url": "Invalid URL format.",
+    "server_not_found": "Server not found.",
+    "no_oauth_config": "No OAuth config.",
+    "auth_failed": "Authorization Failed",
+    "google_error": "Google returned an error: {{error}}",
+    "connected": "{{name}} connected with {{count}} tools. You can close this window.",
+    "connection_failed": "Authorized but Connection Failed",
+    "connection_failed_desc": "Tokens saved, but the server failed to connect: {{error}}. Try reconnecting from Settings.",
+    "authorize_google": "Authorize Google Account",
+    "step1": "1. Click the button below to sign in with Google",
+    "step2": "2. After approving, your browser will show an error page — that's normal",
+    "step3": "3. Copy the full URL from your browser's address bar",
+    "step4": "4. Paste it below and click Connect",
+    "paste_url": "Paste the URL from your browser after signing in:",
+    "connect": "Connect"
+  }
+}

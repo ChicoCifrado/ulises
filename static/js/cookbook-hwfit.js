@@ -31,8 +31,9 @@ import {
 } from './cookbook.js';
 import uiModule from './ui.js';
 import spinnerModule from './spinner.js';
-import { _loadTasks, _tmuxGracefulKill } from './cookbookRunning.js';
+import { _loadTasks, _tmuxGracefulKill, _nextAvailablePort, _taskPort } from './cookbookRunning.js';
 import { openCookbookDependencies } from './cookbook-diagnosis.js';
+import { t } from './i18n.js';
 
 // Map a serve-backend code (vllm / sglang / llamacpp) → the package name
 // the Dependencies API reports. Used to look up "is this backend installed
@@ -62,10 +63,7 @@ async function _ensureBackendInstalled(runBackend, host, port, envPath, modelNam
     return true;
   }
   const targetLabel = host || 'this server';
-  uiModule.showToast(
-    `${pkgName} not installed on ${targetLabel}. Opening Dependencies — pick your model and click Run.`,
-    6000
-  );
+  uiModule.showToast(t('cookbook.backendNotInstalled', { pkg: pkgName, host: targetLabel }), 6000);
   openCookbookDependencies(pkgName, { expandRecipe: pkgName, model: modelName });
   return false;
 }
@@ -80,6 +78,7 @@ export let _cachedModelIds = null; // repo IDs already downloaded
 // after the user has switched servers.
 let _hwfitFetchToken = 0;
 let _dismissedHwChips = new Set();
+let _hwfitAutoScanStarted = new Set();
 // Permanently removed (X-clicked) chips. Separate from _dismissedHwChips
 // so the ranker treats "off" and "removed" the same (both ignore the
 // hardware) but the UI keeps "off" chips visible to toggle back on,
@@ -468,7 +467,7 @@ function _hwfitShowError(list, host, detail) {
   if (rb) rb.addEventListener('click', () => { _resetGpuToggleState(); _hwfitFetch(true); });
 }
 
-// Client-side "Engine" filter (llama.cpp / vLLM / SGLang / Ollama). Empty =
+// Client-side "Engine" filter (llama.cpp / vLLM / SGLang / Ollama / Diffusers). Empty =
 // show all. Uses the same _detectBackend() the serve commands use, so what you
 // filter to is exactly what would be launched. Pure view filter — no refetch
 // needed. Ollama rows are merged into the main list (see _ensureOllamaLib +
@@ -587,6 +586,34 @@ export async function _hwfitFetch(fresh = false) {
     }
     _hwfitRenderList(list, _applyEngineFilter(_cached.models));
   } else {
+    if (!allowNetwork) {
+      _hwfitCache = null;
+      _hwfitRenderHw(hw, null);
+      const loadingDiv = document.createElement('div');
+      loadingDiv.className = 'hwfit-loading';
+      loadingDiv.style.cssText = 'flex-direction:column;gap:6px;text-align:center;';
+      loadingDiv.appendChild(wp.element);
+      const loadingTitle = document.createElement('div');
+      loadingTitle.textContent = 'No cached scan yet';
+      loadingTitle.style.cssText = 'font-size:12px;opacity:0.7;';
+      const loadingLbl = document.createElement('div');
+      loadingLbl.textContent = 'Scanning hardware…';
+      loadingLbl.style.cssText = 'font-size:11px;opacity:0.55;max-width:420px;line-height:1.4;';
+      loadingDiv.appendChild(loadingTitle);
+      loadingDiv.appendChild(loadingLbl);
+      list.innerHTML = '';
+      list.appendChild(loadingDiv);
+      if (!_hwfitAutoScanStarted.has(_sig)) {
+        _hwfitAutoScanStarted.add(_sig);
+        setTimeout(() => {
+          if (_tk === _hwfitFetchToken) {
+            _resetGpuToggleState();
+            _hwfitFetch(true, { autoFromEmpty: true });
+          }
+        }, 60);
+      }
+      return;
+    }
     // Show spinner while scanning — stack the spinner above a text label
     // (the .hwfit-loading class is a centered flex ROW, so force column here).
     const loadingDiv = document.createElement('div');
@@ -857,6 +884,8 @@ function _renderHwVisibilityWarning(sys) {
   box.querySelector('[data-hw-action="manual"]')?.addEventListener('click', () => {
     const panel = document.getElementById('hwfit-manual-panel');
     if (panel) panel.classList.remove('hidden');
+    const manualBtn = document.getElementById('hwfit-hw-manual-btn');
+    if (manualBtn) manualBtn.textContent = 'CANCEL';
     document.getElementById('hwfit-hw-manual-btn')?.scrollIntoView?.({
       behavior: 'smooth',
       block: 'center',
@@ -1021,6 +1050,8 @@ export function _hwfitRenderHw(el, sys) {
         _saveManualHwState(null);
         btn.closest('.hwfit-hw-chip-row')?.remove();
         document.getElementById('hwfit-manual-panel')?.classList.add('hidden');
+        const manualBtn = document.getElementById('hwfit-hw-manual-btn');
+        if (manualBtn) manualBtn.textContent = 'EDIT';
         _resetGpuToggleState();
         _hwfitCache = null;
         _hwfitFetch(true);
@@ -1041,16 +1072,20 @@ function _wireManualHardwareControls(el) {
   const btn = document.getElementById('hwfit-hw-manual-btn');
   const panel = document.getElementById('hwfit-manual-panel');
   if (!btn || !panel) return;
+  const syncManualButton = () => {
+    btn.textContent = panel.classList.contains('hidden') ? 'EDIT' : 'CANCEL';
+  };
   const clearManual = () => {
     _saveManualHwState(null);
     el.querySelector('.hwfit-hw-chip-manual')?.remove();
     panel.classList.add('hidden');
+    syncManualButton();
     _resetGpuToggleState();
     _hwfitCache = null;
     _hwfitFetch(true);
   };
   const manual = _manualHwState();
-  btn.textContent = 'EDIT';
+  syncManualButton();
   if (manual) {
     panel.querySelector('.hwfit-manual-mode').value = manual.mode || 'gpu';
     panel.querySelector('.hwfit-manual-backend').value = manual.backend || 'cuda';
@@ -1066,11 +1101,13 @@ function _wireManualHardwareControls(el) {
     btn._hwfitManualBound = true;
     btn.addEventListener('click', () => {
       panel.classList.toggle('hidden');
+      syncManualButton();
       syncMode();
     });
   }
   el.querySelector('.hwfit-hw-chip-toggle[data-hw-chip="manual"]')?.addEventListener('click', () => {
     panel.classList.remove('hidden');
+    syncManualButton();
     syncMode();
   });
   if (!panel._hwfitManualBound) {
@@ -1087,12 +1124,14 @@ function _wireManualHardwareControls(el) {
       _resetGpuToggleState();
       _hwfitCache = null;
       panel.classList.add('hidden');
+      syncManualButton();
       _hwfitRenderHw(el, _manualDisplaySystem(window._hwfitSystemCache, manual));
       _hwfitFetch(true);
     });
     panel.querySelector('.hwfit-hw-manual-clear')?.addEventListener('click', clearManual);
   }
   syncMode();
+  syncManualButton();
 }
 
 export const _fitColors = { perfect: 'var(--green, #50fa7b)', good: 'var(--yellow, #f1fa8c)', marginal: 'var(--orange, #ffb86c)', too_tight: 'var(--red, #ff5555)' };
@@ -1485,7 +1524,7 @@ export function _expandModelRow(row, modelData) {
         || [..._cachedModelIds].some(id => id === modelData.name || id.endsWith('/' + _short))
       );
       if (_cachedModelIds && !_downloaded) {
-        uiModule.showToast('Model not downloaded yet — starting download. Run again to serve once it finishes.');
+        uiModule.showToast(t('cookbook.modelNotDownloaded'));
         if (backend === 'ollama') {
           _runPanelCmd(panel, _buildDownloadCmd(modelData, backend), { timeout: 0 });
         } else {
@@ -1493,36 +1532,34 @@ export function _expandModelRow(row, modelData) {
         }
         return;
       }
+      // Detect backend and port now — the pre-launch guard below needs them.
+      const _qrBackendDetect = _detectBackend(modelData);
+      const _qrRunBackend = _qrBackendDetect.backend || 'vllm';
+      const _qrPort = _nextAvailablePort();
 
-      // ─── Pre-launch: stop the model already serving on this host ───────
-      // Two servers can't share port 8000. Without this, the new launch
-      // silently collided and the user saw no feedback. We surface the
-      // conflict and offer to kill the running one first as the default
-      // action (it's almost always what the user wants).
+      // ─── Pre-launch: stop colliding serves on the same port ───────
+      // Different ports coexist fine (e.g. vLLM on 8000 + Qwen VL on
+      // 8001). Only block when the new model's port genuinely collides
+      // with a running serve. (Issue #4507)
       try {
         const _qrHostStr = _envState.remoteHost || '';
-        const _activeServes = _loadTasks().filter(t =>
+        const _allServes = _loadTasks().filter(t =>
           t && t.type === 'serve'
           && (t.remoteHost || '') === _qrHostStr
           && (t.status === 'running' || t.status === 'ready' || t._serveReady)
         );
-        if (_activeServes.length) {
-          const _names = _activeServes.map(t => t.payload?.repo_id || t.repo || t.name || '?').filter(Boolean);
+        const _clashing = _allServes.filter(t => _taskPort(t) === _qrPort);
+        if (_clashing.length) {
+          const _names = _clashing.map(t => t.payload?.repo_id || t.repo || t.name || '?').filter(Boolean);
           const _ok = await window.styledConfirm?.(
-            `${_names.length} model${_names.length === 1 ? '' : 's'} already serving on ${_qrHostStr || 'local'} (${_names.join(', ')}). Port 8000 will collide. Stop the running model and launch this one?`,
-            { confirmText: 'Stop & launch', cancelText: 'Cancel' }
+            t('cookbook.confirmStopAndLaunch', { count: _names.length, host: _qrHostStr || 'local', names: _names.join(', ') }),
+            { confirmText: t('cookbook.stopAndLaunch'), cancelText: t('cookbook.cancel') }
           );
           if (!_ok) return;
-          // Mark + kill each running serve, then wait briefly for the
-          // tmux session to actually go down before we kick off the new
-          // launch. Otherwise vLLM still races against the dying socket.
           quickRunBtn.disabled = true;
           quickRunBtn.textContent = 'Stopping…';
-          for (const t of _activeServes) {
+          for (const t of _clashing) {
             try {
-              // Use that task's own Stop button if it's rendered (handles
-              // endpoint cleanup, Ollama unload, fade-out). Falls back to
-              // a direct tmux kill if the Active tab isn't in the DOM yet.
               const _taskEl = document.querySelector(`.cookbook-task[data-task-id="${t.sessionId}"]`);
               const _stopBtn = _taskEl?.querySelector('.cookbook-task-action-stop');
               if (_stopBtn) {
@@ -1537,10 +1574,11 @@ export function _expandModelRow(row, modelData) {
               }
             } catch (_killErr) { /* best-effort */ }
           }
-          // Give the OS a beat to release port 8000.
           await new Promise(r => setTimeout(r, 2500));
         }
       } catch (_e) { /* best-effort */ }
+
+      // -- Launch ───────────────────────────────────────────────────
 
       // ─── Pre-launch driver check ─────────────────────────────────────
       // vLLM/SGLang need a working CUDA/ROCm driver. nvidia-smi failures
@@ -1550,16 +1588,14 @@ export function _expandModelRow(row, modelData) {
       // user watches `pip install vllm` finish, then sees a cryptic CUDA
       // error 10 minutes later. (llama.cpp / Ollama have CPU fallbacks
       // so they skip this gate.)
-      const _qrBackendDetect = _detectBackend(modelData);
-      const _qrRunBackend = _qrBackendDetect.backend || 'vllm';
       if (_qrRunBackend === 'vllm' || _qrRunBackend === 'sglang') {
         const _sys = _hwfitCache?.system || {};
         if (_sys.gpu_error) {
-          uiModule.showError(`Can't launch: GPU driver error — ${_sys.gpu_error}. Reinstall or repair the NVIDIA driver, then re-scan.`);
+          uiModule.showError(t('cookbook.gpuDriverError', { error: _sys.gpu_error }));
           return;
         }
         if (!_sys.has_gpu || !(_sys.gpu_count > 0)) {
-          uiModule.showError(`Can't launch: no GPU detected by nvidia-smi. ${_qrRunBackend === 'vllm' ? 'vLLM' : 'SGLang'} needs a working CUDA or ROCm device.`);
+          uiModule.showError(t('cookbook.noGpuDetected', { backend: _qrRunBackend === 'vllm' ? 'vLLM' : 'SGLang' }));
           return;
         }
       }
@@ -1598,7 +1634,7 @@ export function _expandModelRow(row, modelData) {
               const _hint = _qrRunBackend === 'vllm'
                 ? 'uv pip install -U vllm --torch-backend auto'
                 : "pip install -U 'sglang[all]'";
-              uiModule.showError(`Can't launch: ${_pkg} isn't installed${_qrHostStr ? ' on ' + _qrHostStr : ''}. Install it first:\n${_hint}`);
+              uiModule.showError(t('cookbook.backendNotInstalledLaunch', { pkg: _pkg, host: _qrHostStr, hint: _hint }));
               return;
             }
             // Version-floor check. _minBackendVersion returns null when this
@@ -1612,7 +1648,7 @@ export function _expandModelRow(row, modelData) {
               const _hint = _qrRunBackend === 'vllm'
                 ? 'uv pip install -U vllm --torch-backend auto'
                 : "pip install -U 'sglang[all]'";
-              uiModule.showError(`Can't launch: ${modelData.name} needs ${_pkg} ≥ ${_minVer}, but ${_curVer} is installed${_qrHostStr ? ' on ' + _qrHostStr : ''}. Upgrade:\n${_hint}`);
+              uiModule.showError(t('cookbook.backendVersionTooOld', { model: modelData.name, pkg: _pkg, minVer: _minVer, curVer: _curVer, host: _qrHostStr, hint: _hint }));
               return;
             }
           }
@@ -1658,7 +1694,7 @@ export function _expandModelRow(row, modelData) {
 
       const host = _envState.remoteHost || '';
       const hostIp = host.includes('@') ? host.split('@').pop() : host;
-      const port = '8000';
+      const port = _qrPort;
       const detected = _detectBackend(modelData);
       const runBackend = detected.backend || 'vllm';
 
@@ -1673,7 +1709,7 @@ export function _expandModelRow(row, modelData) {
       } else if (runBackend === 'llamacpp') {
         const dir = `"$HOME/.cache/huggingface/hub/models--${modelData.name.replace(/\//g, '--')}/snapshots"`;
         const ggufPath = `$({ find ${dir} -name '*-00001-of-*.gguf' 2>/dev/null | sort; find ${dir} -name '*.gguf' 2>/dev/null | sort; } | head -1)`;
-        cmd = `llama-server --model "${ggufPath}" --host 0.0.0.0 --port 8080 -ngl 99 -c ${maxCtx} --flash-attn auto`;
+        cmd = `llama-server --model "${ggufPath}" --host 0.0.0.0 --port ${port} -ngl 99 -c ${maxCtx} --flash-attn auto`;
       } else {
         cmd = `vllm serve ${modelData.name} --host 0.0.0.0 --port ${port}`;
         cmd += ` --tensor-parallel-size ${tp}`;
@@ -1737,15 +1773,15 @@ export function _expandModelRow(row, modelData) {
           const shortName = modelData.name.split('/').pop();
           _addTask(data.session_id, shortName, 'serve', { _cmd: cmd, model: modelData.name, backend: runBackend, remote_host: host });
           _renderRunningTab();
-          uiModule.showToast(`Launching ${shortName}...`);
+          uiModule.showToast(t('cookbook.launching', { name: shortName }));
           // Switch to Running tab
           const runTab = document.querySelector('.cookbook-tab[data-backend="Running"]');
           if (runTab) runTab.click();
         } else {
-          uiModule.showError('Launch failed: ' + (data.error || ''));
+          uiModule.showError(t('cookbook.launchFailed', { error: data.error || '' }));
         }
       } catch (e) {
-        uiModule.showError('Launch failed: ' + e.message);
+        uiModule.showError(t('cookbook.launchError', { message: e.message }));
       }
       quickRunBtn.disabled = false;
       quickRunBtn.textContent = 'Run';
@@ -1767,7 +1803,7 @@ export function _expandModelRow(row, modelData) {
         || [..._cachedModelIds].some(id => id === repo || id.endsWith('/' + short))
       );
       if (_cachedModelIds && !downloaded) {
-        uiModule.showToast('Download the model first, then configure from Serve tab');
+        uiModule.showToast(t('cookbook.downloadFirst'));
         return;
       }
       // Downloaded (or cache state unknown) — open the Serve panel, which switches
@@ -1776,11 +1812,88 @@ export function _expandModelRow(row, modelData) {
         const { openServePanelForRepo } = await import('./cookbookServe.js');
         await openServePanelForRepo(repo);
       } catch (e) {
-        uiModule.showToast('Could not open Serve: ' + (e && e.message ? e.message : e));
+        uiModule.showToast(t('cookbook.openServeFailed', { error: e && e.message ? e.message : e }));
       }
     });
   }
 
+}
+
+const _HWFIT_ENGINE_GLYPHS = {
+  '': '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="6" x2="20" y2="6"></line><line x1="4" y1="12" x2="20" y2="12"></line><line x1="4" y1="18" x2="20" y2="18"></line><circle cx="8" cy="6" r="2" fill="currentColor" stroke="none"></circle><circle cx="16" cy="12" r="2" fill="currentColor" stroke="none"></circle><circle cx="10" cy="18" r="2" fill="currentColor" stroke="none"></circle></svg>',
+  vllm: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4l7 16 7-16"></path><path d="M14 4l4 9 3-9"></path></svg>',
+  sglang: '<span aria-hidden="true" style="display:block;width:14px;height:14px;background:currentColor;-webkit-mask:url(/static/icons/sglang-mark.png) center/contain no-repeat;mask:url(/static/icons/sglang-mark.png) center/contain no-repeat;"></span>',
+  llamacpp: '<svg width="14" height="14" viewBox="0 0 600 600" fill="none" aria-hidden="true"><path d="M600 392L504.249 558L504.137 557.929C487.252 584.069 458.193 600 426.864 600H120L240 392H600Z" fill="currentColor"></path><path d="M240 392H0L199.602 46.0254C216.032 17.5463 246.411 0 279.29 0H466.154L240 392Z" fill="currentColor"></path></svg>',
+  ollama: '<span aria-hidden="true" style="display:block;width:14px;height:14px;background:currentColor;-webkit-mask:url(/static/icons/ollama-mark-crop.png) center/contain no-repeat;mask:url(/static/icons/ollama-mark-crop.png) center/contain no-repeat;"></span>',
+  diffusers: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"></path></svg>',
+};
+
+function _hwfitEngineGlyph(value) {
+  return _HWFIT_ENGINE_GLYPHS[value] || _HWFIT_ENGINE_GLYPHS[''];
+}
+
+function _bindHwfitEnginePicker(engine) {
+  const wrap = engine?.closest('.hwfit-engine-wrap');
+  const btn = wrap?.querySelector('[data-hwfit-engine-btn]');
+  const menu = wrap?.querySelector('[data-hwfit-engine-menu]');
+  const icon = wrap?.querySelector('[data-hwfit-engine-icon]');
+  const label = wrap?.querySelector('[data-hwfit-engine-label]');
+  if (!engine || !wrap || !btn || !menu || wrap.dataset.enginePickerBound) return;
+  wrap.dataset.enginePickerBound = '1';
+
+  const setOpen = (open) => {
+    menu.hidden = !open;
+    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  };
+  const currentLabel = () => {
+    const opt = Array.from(engine.options).find((o) => o.value === engine.value);
+    return opt?.textContent || 'Engine';
+  };
+  const syncButton = () => {
+    if (label) label.textContent = currentLabel();
+    if (icon) icon.innerHTML = _hwfitEngineGlyph(engine.value);
+    menu.querySelectorAll('[data-hwfit-engine-value]').forEach((item) => {
+      const active = item.dataset.hwfitEngineValue === engine.value;
+      item.classList.toggle('active', active);
+      item.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+  };
+  const renderMenu = () => {
+    menu.innerHTML = Array.from(engine.options).map((opt) => (
+      `<button type="button" role="option" class="hwfit-engine-item" data-hwfit-engine-value="${opt.value}">`
+      + `<span class="hwfit-engine-item-icon" aria-hidden="true">${_hwfitEngineGlyph(opt.value)}</span>`
+      + `<span class="hwfit-engine-item-label">${opt.textContent}</span>`
+      + '</button>'
+    )).join('');
+    menu.querySelectorAll('[data-hwfit-engine-value]').forEach((item) => {
+      item.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        const next = item.dataset.hwfitEngineValue || '';
+        if (engine.value !== next) {
+          engine.value = next;
+          engine.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        syncButton();
+        setOpen(false);
+      });
+    });
+    syncButton();
+  };
+
+  btn.addEventListener('click', (ev) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    setOpen(menu.hidden);
+  });
+  engine.addEventListener('change', syncButton);
+  document.addEventListener('click', (ev) => {
+    if (!wrap.contains(ev.target)) setOpen(false);
+  });
+  document.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Escape') setOpen(false);
+  });
+  renderMenu();
 }
 
 export function _hwfitInit() {
@@ -1798,6 +1911,7 @@ export function _hwfitInit() {
   // Engine filter is a pure client-side view filter over the already-fetched
   // list (HF + Ollama merged), so just re-render from cache.
   const engine = document.getElementById('hwfit-engine');
+  if (engine) _bindHwfitEnginePicker(engine);
   if (engine) engine.addEventListener('change', () => {
     const list = document.getElementById('hwfit-list');
     if (list && _hwfitCache && Array.isArray(_hwfitCache.models)) {
@@ -2116,8 +2230,8 @@ export function _hwfitInit() {
         }
         const defaultSrv = _serverByVal(_envState.defaultServer);
         uiModule.showToast(_envState.defaultServer
-          ? 'Default server: ' + (_envState.defaultServer === 'local' ? 'Local' : (defaultSrv?.name || defaultSrv?.host || 'selected server'))
-          : 'Default server cleared');
+          ? t('cookbook.defaultServerSet', { server: _envState.defaultServer === 'local' ? 'Local' : (defaultSrv?.name || defaultSrv?.host || 'selected server') })
+          : t('cookbook.defaultServerCleared'));
       });
     }
     const keyBtn = entry.querySelector('.cookbook-server-key-btn');
@@ -2144,7 +2258,7 @@ export function _hwfitInit() {
         const cmd = entry.querySelector('.cookbook-server-key-command')?.value?.trim() || '';
         if (!cmd || cmd.startsWith('Enter ')) return;
         await _copyText(cmd);
-        uiModule.showToast('SSH setup command copied');
+        uiModule.showToast(t('cookbook.sshCommandCopied'));
       });
     }
     entry.querySelectorAll('input, select').forEach(el => {
@@ -2211,9 +2325,9 @@ export function _hwfitInit() {
                 || 'this server';
       let ok = true;
       if (uiModule && uiModule.styledConfirm) {
-        ok = await uiModule.styledConfirm(`Remove "${name}"?`, { confirmText: 'Remove', danger: true });
+        ok = await uiModule.styledConfirm(t('cookbook.removeServer', { name }), { confirmText: t('cookbook.remove'), danger: true });
       } else {
-        ok = confirm(`Remove "${name}"?`);
+        ok = confirm(t('cookbook.removeServer', { name }));
       }
       if (!ok) return;
       entry.remove();
@@ -2249,7 +2363,7 @@ export function _hwfitInit() {
           if (data.ok) {
             setupBtn.textContent = '\u2713 Done';
             setupBtn.style.color = '#50fa7b';
-            uiModule.showToast(`Setup complete (${data.platform})`);
+            uiModule.showToast(t('cookbook.setupComplete', { platform: data.platform }));
             // Store detected platform on the server entry
             if (data.platform) {
               entry.dataset.platform = data.platform;
@@ -2285,12 +2399,12 @@ export function _hwfitInit() {
           } else {
             setupBtn.textContent = 'Failed';
             setupBtn.style.color = 'var(--red)';
-            uiModule.showError(data.error || data.output || 'Setup failed');
+            uiModule.showError(t('cookbook.setupFailed', { error: data.error || data.output || 'Setup failed' }));
           }
         } catch (e) {
           setupBtn.textContent = 'Error';
           setupBtn.style.color = 'var(--red)';
-          uiModule.showError(e.message);
+          uiModule.showError(t('cookbook.setupError', { message: e.message }));
         }
         setTimeout(() => { setupBtn.disabled = false; setupBtn.textContent = origText; setupBtn.style.color = ''; }, 3000);
       });
@@ -2347,7 +2461,7 @@ export function _hwfitInit() {
       tag.classList.add('cookbook-modeldir-target');
       dlEl.title = 'Downloads go here';
       _syncServers();
-      uiModule.showToast((dlEl.dataset.dlDir ? 'Downloads \u2192 ' + dlEl.dataset.dlDir : 'Downloads \u2192 default HF cache'));
+      uiModule.showToast(dlEl.dataset.dlDir ? t('cookbook.downloadsToDir', { dir: dlEl.dataset.dlDir }) : t('cookbook.downloadsToDefault'));
     });
   }
 

@@ -1,0 +1,6 @@
+{
+  "chat_helpers": {
+    "model_not_allowed": "Your account is not allowed to use model '{model}'.",
+    "daily_limit_reached": "Daily message limit reached ({cap}). Try again in 24 hours."
+  }
+}

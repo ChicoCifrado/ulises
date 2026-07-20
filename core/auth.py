@@ -69,7 +69,7 @@ TOKEN_TTL = 60 * 60 * 24 * 7  # 7 days
 RESERVED_USERNAMES = frozenset({INTERNAL_TOOL_USER, "api", "demo", "system"})
 
 
-def normalize_known_username(users: Dict[str, Any], username: str | None) -> Optional[str]:
+def normalize_known_username(users: Dict[str, Any], username: Optional[str]) -> Optional[str]:
     """Return a normalized username only when it exists in the auth user map."""
     key = str(username or "").strip().lower()
     if not key or key not in users:
@@ -176,16 +176,17 @@ class AuthManager:
                 )
                 old_user = "admin"
             old_hash = self._config["password_hash"]
-            self._config = {
-                "users": {
-                    old_user: {
-                        "password_hash": old_hash,
-                        "created": time.time(),
-                        "is_admin": True,
+            with self._config_lock:
+                self._config = {
+                    "users": {
+                        old_user: {
+                            "password_hash": old_hash,
+                            "created": time.time(),
+                            "is_admin": True,
+                        }
                     }
                 }
-            }
-            self._save()
+                self._save()
             logger.info(f"Migrated single-user auth to multi-user (admin: {old_user})")
 
     def _drop_reserved_loaded_users(self):
@@ -204,8 +205,9 @@ class AuthManager:
                 continue
             normalized[key] = data
         if removed or normalized != users:
-            self._config["users"] = normalized
-            self._save()
+            with self._config_lock:
+                self._config["users"] = normalized
+                self._save()
         if removed:
             logger.warning(
                 "Removed reserved username(s) from auth config: %s",

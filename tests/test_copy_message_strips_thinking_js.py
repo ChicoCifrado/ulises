@@ -58,6 +58,10 @@ def _extract_thinking_blocks(text: str) -> dict:
 
         let source = fs.readFileSync('./static/js/markdown.js', 'utf8');
         source = source.replace(
+          /import \{ t \} from ['"]\.\/i18n\.js['"];/,
+          'const t = (key) => key;'
+        );
+        source = source.replace(
           /import uiModule from ['"]\.\/ui\.js['"];/,
           ''
         );

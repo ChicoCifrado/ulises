@@ -1,0 +1,16 @@
+{
+  "integration": {
+    "not_found": "Integration not found: {id}",
+    "disabled": "Integration '{name}' is disabled",
+    "path_must_start_with_slash": "Path must start with /",
+    "path_no_protocol": "Path must not contain a protocol scheme",
+    "path_no_fragment": "Path must not contain a fragment",
+    "request_timed_out": "Request to {name} timed out",
+    "request_failed": "Request failed: {error}",
+    "unexpected_error": "Unexpected error: {error}",
+    "name_required": "Integration name is required",
+    "base_url_required": "Integration base URL is required",
+    "base_url_no_query_fragment": "Integration base URL must not include query or fragment",
+    "base_url_must_be_http": "Integration base URL must be an HTTP(S) URL"
+  }
+}

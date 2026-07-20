@@ -1,0 +1,14 @@
+{
+  "session": {
+    "unstar_before_delete": "Quita la estrella de la sesión antes de eliminarla",
+    "delete_failed": "Error al eliminar la sesión",
+    "delete_bulk_failed": "Error al eliminar las sesiones",
+    "archive_failed": "Error al archivar la sesión",
+    "unarchive_failed": "Error al desarchivar la sesión",
+    "importance_update_failed": "Error al actualizar la importancia de la sesión",
+    "no_unfiled": "No hay sesiones sin clasificar para ordenar",
+    "errors": {
+      "topic_analysis_failed": "Análisis de tema fallido: {{error}}"
+    }
+  }
+}

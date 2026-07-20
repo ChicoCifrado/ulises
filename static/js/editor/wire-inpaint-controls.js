@@ -31,6 +31,7 @@
  *   uiModule:                 object,
  * }} deps
  */
+import { t } from '../i18n.js';
 import { state } from './state.js';
 
 const EYE_OPEN_SM = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
@@ -121,7 +122,7 @@ export function wireInpaintControls({
     state.maskCtx.putImageData(imgData, 0, 0);
     composite();
     syncToolClearIndicators();
-    uiModule.showToast('Mask inverted');
+    uiModule.showToast(t('editor.mask_inverted'));
   });
   document.getElementById('ge-inpaint-clear')?.addEventListener('click', () => {
     if (state.maskCtx) { state.maskCtx.clearRect(0, 0, state.maskCanvas.width, state.maskCanvas.height); composite(); }

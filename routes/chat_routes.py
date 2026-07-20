@@ -11,6 +11,7 @@ from typing import Dict, Any, AsyncGenerator, List, Optional
 from fastapi import APIRouter, Request, HTTPException, Form, Query
 from fastapi.responses import StreamingResponse
 from pydantic import ValidationError
+from core.translations import t
 
 from core.models import ChatMessage
 from src.request_models import ChatRequest
@@ -29,6 +30,7 @@ from routes.document_helpers import _owner_session_filter
 from core.database import SessionLocal, get_session_mode, set_session_mode
 from core.database import Session as DBSession, ChatMessage as DBChatMessage
 from core.database import Document as DBDocument, ModelEndpoint
+from core.log_safety import redact_url
 from routes.research_routes import _resolve_research_endpoint
 from routes.model_routes import _visible_models
 from routes.chat_helpers import (
@@ -39,8 +41,13 @@ from routes.chat_helpers import (
     clean_thinking_for_save,
     _enforce_chat_privileges,
 )
-from src.action_intents import classify_tool_intent as _classify_tool_intent
-from src.tool_policy import build_effective_tool_policy
+from src.action_intents import ToolIntent, classify_tool_intent as _classify_tool_intent
+from src.tool_policy import (
+    WEB_TOOL_NAMES,
+    build_effective_tool_policy,
+    is_web_search_explicitly_denied,
+    web_search_enabled_for_turn,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -362,20 +369,17 @@ def setup_chat_routes(
         try:
             sess = session_manager.get_session(session)
         except KeyError:
-            raise HTTPException(404, f"Session '{session}' not found")
+            raise HTTPException(404, t("chat.session_not_found").format(name=session))
         owner = effective_user(request)
         if _clear_orphaned_session_endpoint(sess, owner=owner):
-            raise HTTPException(400, "Selected model endpoint was removed. Pick another model in Settings.")
+            raise HTTPException(400, t("chat.model_removed"))
 
         # Empty model + live endpoint = setup race (Issue #587). Repair from
         # the endpoint's cached model list before privilege checks, which
         # otherwise see "" and behave inconsistently with the allowlist.
         _recover_empty_session_model(sess, session, owner=owner)
         if not getattr(sess, "model", "").strip():
-            raise HTTPException(
-                400,
-                "No model selected for this chat. Open the model picker and choose one before sending.",
-            )
+            raise HTTPException(400, t("chat.no_model_selected"))
 
         # Same allowed_models + daily-cap gate as chat_stream (mirror so the
         # non-streaming path can't be used to bypass).
@@ -461,11 +465,11 @@ def setup_chat_routes(
                 try:
                     body = await request.json()
                 except json.JSONDecodeError as e:
-                    raise HTTPException(400, f"Invalid JSON: {e}")
+                    raise HTTPException(400, t("chat.invalid_json").format(error=e))
         except HTTPException:
             raise
         except Exception as e:
-            raise HTTPException(400, f"Request parsing error: {e}")
+            raise HTTPException(400, t("chat.request_parsing_error").format(error=e))
 
         _set_user_time_from_request(request)
 
@@ -509,6 +513,7 @@ def setup_chat_routes(
         # below). Skill extraction should only learn from real agent sessions,
         # not chats we quietly promoted for a notes/calendar intent.
         user_requested_agent = (chat_mode == "agent")
+        _search_enabled = web_search_enabled_for_turn(allow_web_search, use_web)
         # Intent auto-escalation: if the user is clearly asking the assistant
         # to create a todo, reminder, or calendar event, promote chat → agent
         # for this turn so the LLM has access to manage_notes / manage_calendar.
@@ -605,7 +610,7 @@ def setup_chat_routes(
             sess = session_manager.get_session(session)
             owner = effective_user(request)
             if _clear_orphaned_session_endpoint(sess, owner=owner):
-                raise HTTPException(400, "Selected model endpoint was removed. Pick another model in Settings.")
+                raise HTTPException(400, t("chat.model_removed"))
             # Issue #587: picker shows a model from the endpoint cache but
             # s.model never made it onto the DB row (first-send race after
             # endpoint setup, or a previous endpoint delete/recreate). Pull
@@ -614,14 +619,11 @@ def setup_chat_routes(
             # generic 401/503).
             _recover_empty_session_model(sess, session, owner=owner)
             if not getattr(sess, "model", "").strip():
-                raise HTTPException(
-                    400,
-                    "No model selected for this chat. Open the model picker and choose one before sending.",
-                )
+                raise HTTPException(400, t("chat.no_model_selected"))
         except SessionNotFoundError as e:
             raise HTTPException(404, str(e))
         except (ValueError, ValidationError):
-            raise HTTPException(400, "Invalid request parameters")
+            raise HTTPException(400, t("chat.invalid_request"))
 
         # ------------------------------------------------------------------ #
         # Privilege gates that must fire BEFORE any LLM work / token spend.
@@ -765,20 +767,35 @@ def setup_chat_routes(
 
         # Build disabled-tools set from frontend toggles + user privileges
         disabled_tools = set()
-        # Only disable bash/web_search when the caller *explicitly* set them
-        # to a falsy value.  When unset (None), defer to per-user privilege
-        # checks below — this lets admins with can_use_bash=True use bash
-        # by default without having to send allow_bash in every request.
+        # Only disable bash when the caller *explicitly* set it to a falsy
+        # value. When unset (None), defer to per-user privilege checks below.
+        # Web search is per-turn opt-in: either the chat pre-search setting
+        # (`use_web=true`) or agent web toggle (`allow_web_search=true`) must
+        # explicitly enable it.
         if allow_bash is not None and str(allow_bash).lower() != "true":
             disabled_tools.add("bash")
         _explicit_web_intent = bool(_tool_intent and _tool_intent.category == "web")
-        if (
-            allow_web_search is not None
-            and str(allow_web_search).lower() != "true"
-            and not _explicit_web_intent
-        ):
-            disabled_tools.add("web_search")
-            disabled_tools.add("web_fetch")
+        if is_web_search_explicitly_denied(allow_web_search) or not _search_enabled:
+            disabled_tools.update(WEB_TOOL_NAMES)
+        if _explicit_web_intent:
+            # A direct lookup/search request should not drift into personal
+            # tools or shell fallbacks. It can only use web_search/web_fetch
+            # when the request's explicit web setting enabled them.
+            disabled_tools.update({
+                "bash", "python",
+                "search_chats", "manage_skills", "manage_memory",
+                "read_file", "write_file", "edit_file",
+                "create_document", "edit_document", "update_document",
+                "send_email", "reply_to_email",
+                "manage_notes", "manage_calendar", "manage_tasks",
+                "api_call", "builtin_browser",
+            })
+            if _search_enabled:
+                disabled_tools.difference_update(WEB_TOOL_NAMES)
+            else:
+                disabled_tools.update(WEB_TOOL_NAMES)
+        elif _search_enabled:
+            disabled_tools.difference_update(WEB_TOOL_NAMES)
 
         # Nobody/incognito mode: deny tools that would expose the user's
         # persistent memory, past chats, or other identity-linked data.
@@ -829,11 +846,7 @@ def setup_chat_routes(
         from src.settings import get_setting
         _global_disabled = get_setting("disabled_tools", [])
         if _global_disabled and isinstance(_global_disabled, list):
-            explicit_web_allowed = allow_web_search is not None and str(allow_web_search).lower() == "true"
-            if explicit_web_allowed:
-                disabled_tools.update(t for t in _global_disabled if t not in {"web_search", "web_fetch"})
-            else:
-                disabled_tools.update(_global_disabled)
+            disabled_tools.update(_global_disabled)
 
         # Light auto-escalation: the user is in chat mode and just expressed a
         # notes/calendar/email intent. Grant the relevant managers but withhold
@@ -930,7 +943,7 @@ def setup_chat_routes(
             if effective_do_research:
                 _r_ep, _r_model, _r_headers = _resolve_research_endpoint(sess)
                 _auth_keys = list(_r_headers.keys()) if _r_headers else []
-                logger.info(f"Research endpoint resolved: model={_r_model}, endpoint={_r_ep}, auth_keys={_auth_keys}, sess_headers_keys={list(sess.headers.keys()) if isinstance(sess.headers, dict) else type(sess.headers)}")
+                logger.info(f"Research endpoint resolved: model={_r_model}, endpoint={redact_url(_r_ep)}, auth_keys={_auth_keys}, sess_headers_keys={list(sess.headers.keys()) if isinstance(sess.headers, dict) else type(sess.headers)}")
 
                 # Clarification round: only for very short/vague queries on first research message.
                 # Skip in compare mode — each pane is a fresh session, so every one would
@@ -1083,7 +1096,7 @@ def setup_chat_routes(
                     _active_streams.pop(session, None)
                     return
                 if not get_setting("image_gen_enabled", True):
-                    yield f'data: {json.dumps({"delta": "Image generation is disabled by the administrator."})}\n\n'
+                    yield f'data: {json.dumps({"delta": t("chat.image_gen_disabled")})}\n\n'
                     yield "data: [DONE]\n\n"
                     _active_streams.pop(session, None)
                     return
@@ -1254,7 +1267,14 @@ def setup_chat_routes(
                 try:
                     from src.settings import get_setting
                     from src.agent_tools import MAX_AGENT_ROUNDS as _DEFAULT_ROUNDS
-                    _tool_budget = int(get_setting("agent_max_tool_calls", 0))
+                    # Per-message tool budget from settings; guard defensively in
+                    # case settings.json was hand-edited to a non-numeric value
+                    # (the HTTP admin endpoint validates, but direct edits bypass
+                    # it). 0 = unlimited, matching auth_routes set_settings().
+                    try:
+                        _tool_budget = int(get_setting("agent_max_tool_calls", 0))
+                    except (TypeError, ValueError):
+                        _tool_budget = 0
                     # Per-message round cap from settings; clamp defensively in
                     # case settings.json was hand-edited to a bad value.
                     try:
@@ -1264,8 +1284,8 @@ def setup_chat_routes(
                     _max_rounds = max(1, min(_max_rounds, 200))
 
                     _forced_tools = None
-                    if allow_web_search is not None and str(allow_web_search).lower() == "true":
-                        _forced_tools = {"web_search", "web_fetch"}
+                    if _search_enabled:
+                        _forced_tools = set(WEB_TOOL_NAMES)
 
                     async for chunk in stream_agent_loop(
                         sess.endpoint_url,
@@ -1289,6 +1309,7 @@ def setup_chat_routes(
                         approved_plan=approved_plan or None,
                         workspace=workspace or None,
                         forced_tools=_forced_tools,
+                        uploaded_files=att_ids,
                     ):
                         if chunk.startswith("data: ") and not chunk.startswith("data: [DONE]"):
                             try:
@@ -1436,7 +1457,7 @@ def setup_chat_routes(
     async def chat_resume(request: Request, session_id: str) -> StreamingResponse:
         _verify_session_owner(request, session_id)
         if not agent_runs.is_active(session_id):
-            raise HTTPException(404, "No active run for this session")
+            raise HTTPException(404, t("chat.no_active_run"))
         return StreamingResponse(agent_runs.subscribe(session_id), media_type="text/event-stream")
 
     # ------------------------------------------------------------------ #
@@ -1464,7 +1485,7 @@ def setup_chat_routes(
         if rec is None:
             if agent_runs.is_active(session_id):
                 return {"status": "streaming", "detached": True}
-            raise HTTPException(404, "No active stream for this session")
+            raise HTTPException(404, t("chat.no_active_stream"))
         return rec
 
     # ------------------------------------------------------------------ #
@@ -1480,7 +1501,7 @@ def setup_chat_routes(
             session_manager.save_sessions()
             return {"status": "context_injected"}
         except KeyError:
-            raise HTTPException(404, "Session not found")
+            raise HTTPException(404, t("chat.session_not_found_generic"))
 
     # ------------------------------------------------------------------ #
     # GET /api/search — search across chat messages
@@ -1519,21 +1540,21 @@ def setup_chat_routes(
         try:
             body = await request.json()
         except Exception:
-            raise HTTPException(400, "Invalid JSON")
+            raise HTTPException(400, t("chat.invalid_json_parse"))
 
         session_id = body.get("session_id")
         original_text = body.get("original_text", "")
         instruction = body.get("instruction", "")
 
         if not session_id or not original_text or not instruction:
-            raise HTTPException(400, "session_id, original_text, and instruction are required")
+            raise HTTPException(400, t("chat.session_required"))
 
         _verify_session_owner(request, session_id)
 
         try:
             sess = session_manager.get_session(session_id)
         except (KeyError, SessionNotFoundError):
-            raise HTTPException(404, "Session not found")
+            raise HTTPException(404, t("chat.session_not_found_generic"))
 
         messages = [
             {"role": "system", "content": (

@@ -16,6 +16,7 @@ import spinnerModule from './spinner.js';
 import { openLibrary, closeLibrary, isLibraryOpen, initLibrary } from './documentLibrary.js';
 import signatureModule from './signature.js';
 import * as Modals from './modalManager.js';
+import { t } from './i18n.js';
 
   let API_BASE = '';
   let isOpen = false;
@@ -98,7 +99,7 @@ import * as Modals from './modalManager.js';
     const accounts = await _getEmailAccountsCached();
     const activeAccount = accounts.find(a => String(a.id) === String(activeAccountId));
     if (!activeAccount || _accountCanSend(activeAccount)) return activeAccountId;
-    if (uiModule) uiModule.showToast('Selected email account is receive-only; using your SMTP account.');
+    if (uiModule) uiModule.showToast(t('document.email_receive_only_smtp'));
     return null;
   }
 
@@ -165,7 +166,7 @@ import * as Modals from './modalManager.js';
           await newDocument();
         } catch (err) {
           console.error('Failed to create document from sidebar button:', err);
-          if (uiModule) uiModule.showError('Failed to create document');
+          if (uiModule) uiModule.showError(t('document.create_failed'));
         }
       });
     }
@@ -625,7 +626,7 @@ import * as Modals from './modalManager.js';
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (e) {
-      if (uiModule) uiModule.showError('Export failed: ' + e.message);
+      if (uiModule) uiModule.showError(t('document.export_failed', { msg: e.message }));
       else alert('Export failed: ' + e.message);
     }
   }
@@ -1104,7 +1105,7 @@ import * as Modals from './modalManager.js';
     if (_pdfPaneProximityWired || !pane) return;
     _pdfPaneProximityWired = true;
     let raf = 0;
-    const buffer = 30;
+    const buffer = 44;
     pane.addEventListener('mousemove', (ev) => {
       if (raf) return;
       raf = requestAnimationFrame(() => {
@@ -1462,7 +1463,12 @@ import * as Modals from './modalManager.js';
     };
     if (!_isTouch) {
       wrap.addEventListener('mouseenter', () => _setHandlesVisible(true));
-      wrap.addEventListener('mouseleave', () => _setHandlesVisible(false));
+      // Handles intentionally sit outside the annotation rectangle. Hiding on
+      // wrap mouseleave makes them disappear while moving toward those controls;
+      // pane-level proximity below owns hiding once the cursor is genuinely away.
+      for (const h of [del, grip, resize, menuBtn].filter(Boolean)) {
+        h.addEventListener('mouseenter', () => _setHandlesVisible(true));
+      }
     }
     wrap.addEventListener('pointerdown', (ev) => {
       if (ev.target === del || ev.target === grip || ev.target === resize || ev.target === menuBtn) return;
@@ -1790,7 +1796,7 @@ import * as Modals from './modalManager.js';
       const proposed = (data && data.annotations) || [];
       if (!proposed.length) {
         _setPdfSaveStatus('idle');
-        if (uiModule && uiModule.showToast) uiModule.showToast('AI found nothing to fill');
+        if (uiModule && uiModule.showToast) uiModule.showToast(t('document.ai_nothing_to_fill'));
         return;
       }
       // Merge into markdown via the same _writeAnnotations path: parse current,
@@ -1822,7 +1828,7 @@ import * as Modals from './modalManager.js';
         throw new Error(t || r2.statusText);
       }
       _setPdfSaveStatus('saved');
-      if (uiModule && uiModule.showToast) uiModule.showToast(`AI added ${proposed.length} annotations`);
+      if (uiModule && uiModule.showToast) uiModule.showToast(t('document.ai_annotations_added', { count: proposed.length }));
       _renderPdfPane();
     } catch (e) {
       console.error('AI fill failed:', e);
@@ -2255,20 +2261,27 @@ import * as Modals from './modalManager.js';
   }
 
   // ── WYSIWYG email body helpers ──
+  function _emailPlainTextToHtml(text) {
+    const d = document.createElement('div');
+    d.textContent = text == null ? '' : String(text);
+    return d.innerHTML.replace(/\n/g, '<br>');
+  }
+
   function _emailBodyToHtml(text) {
     const t = (text || '').trim();
     if (!t) return '';
     // If it already contains a formatting/structural HTML tag, it's a saved
-    // WYSIWYG body — use it verbatim. (Checking a leading '<' isn't enough: a
+    // WYSIWYG body — sanitize it before rendering. (Checking a leading '<' isn't enough: a
     // rich body often starts with plain text, e.g. "Hi <b>there</b>".)
-    if (/<\/?(b|i|u|s|strong|em|del|strike|a|p|div|br|ul|ol|li|h[1-3]|blockquote|span|code|pre)\b[^>]*>/i.test(t)) return t;
+    if (/<\/?(b|i|u|s|strong|em|del|strike|a|p|div|br|ul|ol|li|h[1-3]|blockquote|span|code|pre)\b[^>]*>/i.test(t)) {
+      return markdownModule.sanitizeAllowedHtml
+        ? markdownModule.sanitizeAllowedHtml(t)
+        : _emailPlainTextToHtml(t);
+    }
     // Email body: keep author-typed `:shortcode:` text literal. Issue #345
     // (shortcode → emoji) is scoped to chat; do not rewrite colons in mail.
     try { return markdownModule.mdToHtml(text, { shortcodes: false }); }
-    catch (_) {
-      const d = document.createElement('div'); d.textContent = text;
-      return d.innerHTML.replace(/\n/g, '<br>');
-    }
+    catch (_) { return _emailPlainTextToHtml(text); }
   }
   // Mirror the rich body's plain text into the hidden textarea so the existing
   // send / draft / change-detection plumbing (which reads the textarea) stays
@@ -2577,12 +2590,12 @@ import * as Modals from './modalManager.js';
                 if (data.doc_id) {
                   await loadDocument(data.doc_id);
                 } else if (uiModule) {
-                  uiModule.showError(data.error || 'Failed to open PDF');
+                  uiModule.showError(data.error || t('document.open_pdf_failed'));
                   window.open(`${API_BASE}/api/email/attachment/${encodeURIComponent(fields.sourceUid)}/${att.index}?folder=${folderQs}`, '_blank');
                 }
               } catch (e) {
                 console.error('Open PDF attachment failed:', e);
-                if (uiModule) uiModule.showError('Failed to open PDF');
+                if (uiModule) uiModule.showError(t('document.open_pdf_failed'));
               }
             }));
             attDiv.appendChild(chip);
@@ -2611,7 +2624,7 @@ import * as Modals from './modalManager.js';
                 setTimeout(() => URL.revokeObjectURL(url), 1000);
               } catch (e) {
                 console.error('Download attachment failed:', e);
-                if (uiModule) uiModule.showError('Download failed: ' + e.message);
+                if (uiModule) uiModule.showError(t('document.download_failed', { msg: e.message }));
               }
             }));
             attDiv.appendChild(chip);
@@ -2686,10 +2699,10 @@ import * as Modals from './modalManager.js';
             size: data.size,
           });
         } else {
-          if (uiModule) uiModule.showError(`Failed to upload ${file.name}: ${data.error || ''}`);
+          if (uiModule) uiModule.showError(t('document.upload_failed_format', { name: file.name, error: data.error || '' }));
         }
       } catch (err) {
-        if (uiModule) uiModule.showError(`Failed to upload ${file.name}`);
+        if (uiModule) uiModule.showError(t('document.upload_failed', { name: file.name }));
       }
     }
     _renderComposeAttachments();
@@ -2764,11 +2777,11 @@ import * as Modals from './modalManager.js';
   async function _uploadMarkdownImages(files) {
     const images = Array.from(files || []).filter(_isMarkdownImageFile);
     if (!images.length) {
-      if (uiModule) uiModule.showError('Choose an image file');
+      if (uiModule) uiModule.showError(t('document.choose_image_file'));
       return;
     }
     if (_activeDocLanguage() !== 'markdown') {
-      if (uiModule) uiModule.showError('Switch the document to markdown before inserting images');
+      if (uiModule) uiModule.showError(t('document.switch_to_markdown_first'));
       return;
     }
 
@@ -2786,10 +2799,10 @@ import * as Modals from './modalManager.js';
       const uploaded = Array.isArray(data?.files) ? data.files : [];
       if (!uploaded.length) throw new Error('No uploaded files returned');
       _insertMarkdownImages(uploaded);
-      if (uiModule) uiModule.showToast(images.length === 1 ? 'Image inserted' : 'Images inserted');
+      if (uiModule) uiModule.showToast(images.length === 1 ? t('document.image_inserted') : t('document.images_inserted'));
     } catch (err) {
       console.error('Failed to insert markdown image:', err);
-      if (uiModule) uiModule.showError('Failed to insert image');
+      if (uiModule) uiModule.showError(t('document.insert_image_failed'));
     }
   }
 
@@ -3061,11 +3074,11 @@ import * as Modals from './modalManager.js';
     const doc = docs.get(activeDocId);
     const attachments = (doc?._composeAtts || []).map(a => a.token);
     if (!to || !body) {
-      if (uiModule) uiModule.showError('To and body are required');
+      if (uiModule) uiModule.showError(t('document.to_and_body_required'));
       return;
     }
     if (inReplyTo && !_emailReplyOwnText(body)) {
-      if (uiModule) uiModule.showError('Reply body is empty');
+      if (uiModule) uiModule.showError(t('document.reply_body_empty'));
       return;
     }
     // Warn if body mentions attachments but none are actually attached
@@ -3090,7 +3103,7 @@ import * as Modals from './modalManager.js';
     try {
       let canceled = false;
       if (uiModule) {
-        uiModule.showToast('Sending', {
+        uiModule.showToast(t('document.sending'), {
           duration: 3200,
           leadingIcon: 'spinner',
           action: 'Cancel',
@@ -3103,7 +3116,7 @@ import * as Modals from './modalManager.js';
       if (canceled) {
         _restoreDetachedEmailDoc(detachedEmailDoc);
         detachedEmailDoc = null;
-        if (uiModule) uiModule.showToast('Send canceled');
+        if (uiModule) uiModule.showToast(t('document.send_canceled'));
         return;
       }
 
@@ -3129,7 +3142,7 @@ import * as Modals from './modalManager.js';
       if (!res.ok && data && !data.error) data.error = `Send failed (${res.status})`;
       if (data.success) {
         if (uiModule) {
-          uiModule.showToast('Message sent', {
+          uiModule.showToast(t('document.message_sent'), {
             duration: 7000,
             leadingIcon: 'check',
             action: 'View Message',
@@ -3190,12 +3203,12 @@ import * as Modals from './modalManager.js';
       } else {
         _restoreDetachedEmailDoc(detachedEmailDoc);
         detachedEmailDoc = null;
-        if (uiModule) uiModule.showError(data.error || 'Failed to send');
+        if (uiModule) uiModule.showError(data.error || t('document.send_failed'));
       }
     } catch (e) {
       _restoreDetachedEmailDoc(detachedEmailDoc);
       detachedEmailDoc = null;
-      if (uiModule) uiModule.showError(e?.message ? `Failed to send email: ${e.message}` : 'Failed to send email');
+      if (uiModule) uiModule.showError(e?.message ? t('document.send_email_failed_format', { msg: e.message }) : t('document.send_email_failed'));
     } finally {
       if (sendSpinner) sendSpinner.destroy();
       if (btn) {
@@ -3240,13 +3253,13 @@ import * as Modals from './modalManager.js';
       });
       const data = await res.json();
       if (data.success) {
-        if (uiModule) uiModule.showToast('Draft saved to mailbox');
+        if (uiModule) uiModule.showToast(t('document.draft_saved'));
       } else {
-        if (uiModule) uiModule.showError(data.error || 'Failed to save draft');
+        if (uiModule) uiModule.showError(data.error || t('document.save_draft_failed'));
       }
     } catch (e) {
       const timedOut = e && e.name === 'AbortError';
-      if (uiModule) uiModule.showError(timedOut ? 'Saving draft timed out' : 'Failed to save draft');
+      if (uiModule) uiModule.showError(timedOut ? t('document.save_draft_timed_out') : t('document.save_draft_failed'));
     } finally {
       clearTimeout(timeout);
       if (btn) { btn.disabled = false; btn.textContent = 'Draft'; }
@@ -3495,12 +3508,12 @@ import * as Modals from './modalManager.js';
         // own work and the original quote are untouched.
         const newBody = currentBody ? cleanReply + '\n\n' + currentBody : cleanReply;
         await _streamEmailBodyText(textarea, newBody);
-        if (uiModule) uiModule.showToast(`AI draft inserted (${data.model_used || 'AI'})`);
+        if (uiModule) uiModule.showToast(t('document.ai_draft_inserted', { model: data.model_used || 'AI' }));
       } else {
-        if (uiModule) uiModule.showError(data.error || 'Failed to generate reply');
+        if (uiModule) uiModule.showError(data.error || t('document.generate_reply_failed'));
       }
     } catch (e) {
-      if (uiModule) uiModule.showError('Failed to generate AI reply');
+      if (uiModule) uiModule.showError(t('document.generate_ai_reply_failed'));
     } finally {
       if (btn) { btn.disabled = false; btn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style="color:var(--accent, var(--red));flex-shrink:0;position:relative;top:-1px;"><path d="M12 0L14.59 8.41L23 12L14.59 15.59L12 24L9.41 15.59L1 12L9.41 8.41Z"/></svg><span style="font-size:11px;margin-left:4px;">Reply</span>'; }
     }
@@ -3523,11 +3536,11 @@ import * as Modals from './modalManager.js';
     const attachments = (doc?._composeAtts || []).map(a => a.token);
 
     if (!to || !body) {
-      if (uiModule) uiModule.showError('To and body are required');
+      if (uiModule) uiModule.showError(t('document.to_and_body_required'));
       return;
     }
     if (inReplyTo && !_emailReplyOwnText(body)) {
-      if (uiModule) uiModule.showError('Reply body is empty');
+      if (uiModule) uiModule.showError(t('document.reply_body_empty'));
       return;
     }
     if (attachments.length === 0 && _bodyMentionsAttachment(body)) {
@@ -3617,7 +3630,7 @@ import * as Modals from './modalManager.js';
 
     overlay.querySelector('#sched-confirm').addEventListener('click', async () => {
       const localDt = dtInput.value;
-      if (!localDt) { if (uiModule) uiModule.showError('Please pick a time'); return; }
+      if (!localDt) { if (uiModule) uiModule.showError(t('document.pick_time')); return; }
       // Convert local datetime to UTC ISO
       const utcIso = new Date(localDt).toISOString();
       try {
@@ -3636,15 +3649,15 @@ import * as Modals from './modalManager.js';
         });
         const data = await res.json();
         if (data.success) {
-          if (uiModule) uiModule.showToast(`Scheduled for ${new Date(localDt).toLocaleString()}`);
+          if (uiModule) uiModule.showToast(t('document.scheduled_for', { time: new Date(localDt).toLocaleString() }));
           cleanup();
           // Close the document
           _closeWithoutDeleting(true);
         } else {
-          if (uiModule) uiModule.showError(data.error || 'Failed to schedule');
+          if (uiModule) uiModule.showError(data.error || t('document.schedule_failed'));
         }
       } catch (e) {
-        if (uiModule) uiModule.showError('Failed to schedule');
+        if (uiModule) uiModule.showError(t('document.schedule_failed'));
       }
     });
   }
@@ -3812,7 +3825,7 @@ import * as Modals from './modalManager.js';
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ session_id: '' }),
       }).then(() => {
-        if (toast && uiModule) uiModule.showToast('Document unlinked from session');
+        if (toast && uiModule) uiModule.showToast(t('document.unlinked_from_session'));
       }).catch(() => {});
     } else {
       fetch(`${API_BASE}/api/document/${docId}`, { method: 'DELETE' }).catch(() => {});
@@ -4890,18 +4903,18 @@ import * as Modals from './modalManager.js';
         if (!res.ok) throw new Error('Failed');
         const versions = await res.json();
         if (versions.length < 2) {
-          if (uiModule) uiModule.showToast('No previous version to compare');
+          if (uiModule) uiModule.showToast(t('document.no_previous_version'));
           return;
         }
         // versions are sorted desc — [0] is latest, [1] is previous
         const prevContent = versions[1].content || '';
         if (prevContent === current) {
-          if (uiModule) uiModule.showToast('No changes from previous version');
+          if (uiModule) uiModule.showToast(t('document.no_changes_from_previous'));
           return;
         }
         enterDiffMode(prevContent, current);
       } catch {
-        if (uiModule) uiModule.showError('Failed to load version history');
+        if (uiModule) uiModule.showError(t('document.load_version_history_failed'));
       }
     });
 
@@ -6154,7 +6167,7 @@ import * as Modals from './modalManager.js';
       if (textarea) textarea.focus();
     } catch (e) {
       console.error('Failed to create document:', e);
-      if (uiModule) uiModule.showError('Failed to create document');
+      if (uiModule) uiModule.showError(t('document.create_failed'));
     } finally {
       _creatingDoc = false;
     }
@@ -6194,7 +6207,7 @@ import * as Modals from './modalManager.js';
     const quote = quoteIdx >= 0 ? lines.slice(quoteIdx).join('\n') : '';
     const ownText = _emailReplyOwnText(fields.body || '');
     if (ownText && !/^(\[AI reply draft will appear here\]|Drafting AI reply)/i.test(ownText)) {
-      if (uiModule) uiModule.showToast('AI reply ready, but draft was edited');
+      if (uiModule) uiModule.showToast(t('document.ai_reply_draft_edited'));
       return;
     }
     const body = String(replyText || '').trim() + (quote ? `\n\n${quote}` : '');
@@ -7611,7 +7624,7 @@ import * as Modals from './modalManager.js';
 
     if (_diffChunks.length === 0) {
       _diffModeActive = false;
-      if (uiModule) uiModule.showToast('No changes');
+      if (uiModule) uiModule.showToast(t('common.no_changes'));
       return;
     }
 
@@ -8148,7 +8161,7 @@ import * as Modals from './modalManager.js';
         await navigator.clipboard.writeText(textarea.value);
       } catch (e) { /* ignore */ }
     }
-    if (uiModule) uiModule.showToast('Copied to clipboard');
+    if (uiModule) uiModule.showToast(t('common.copied_to_clipboard'));
   }
 
   /* ---- Per-tab context menu ---- */
@@ -8306,7 +8319,7 @@ import * as Modals from './modalManager.js';
   async function _sendSignedReply(docId) {
     const doc = docs.get(docId);
     if (!doc || !doc.sourceEmailUid) return;
-    if (uiModule) uiModule.showToast('Preparing signed reply…');
+    if (uiModule) uiModule.showToast(t('document.preparing_signed_reply'));
     let result;
     try {
       const res = await fetch(`${API_BASE}/api/document/${encodeURIComponent(docId)}/prepare-signed-reply`, {
@@ -8316,12 +8329,12 @@ import * as Modals from './modalManager.js';
       result = await res.json().catch(() => ({}));
       if (!res.ok || !result.ok) {
         const msg = (result && result.error) || `HTTP ${res.status}`;
-        if (uiModule) uiModule.showError(`Couldn't prepare signed reply: ${msg}`);
+        if (uiModule) uiModule.showError(t('document.prepare_signed_reply_failed', { msg: msg }));
         return;
       }
     } catch (e) {
       console.error('prepare-signed-reply failed:', e);
-      if (uiModule) uiModule.showError("Couldn't prepare signed reply");
+      if (uiModule) uiModule.showError(t('document.prepare_signed_reply_failed'));
       return;
     }
 
@@ -8335,7 +8348,7 @@ import * as Modals from './modalManager.js';
         d._composeAtts = (d._composeAtts || []).concat([att]);
         await loadDocument(d.id);
         _renderComposeAttachments();
-        if (uiModule) uiModule.showToast(`Added "${att.filename}" to the reply draft`);
+        if (uiModule) uiModule.showToast(t('document.attachment_added_to_draft', { filename: att.filename }));
         return;
       }
     }
@@ -8376,7 +8389,7 @@ import * as Modals from './modalManager.js';
       if (!draftId) throw new Error('No draft id returned');
     } catch (e) {
       console.error('Failed to create draft doc:', e);
-      if (uiModule) uiModule.showError("Couldn't create reply draft");
+      if (uiModule) uiModule.showError(t('document.create_reply_draft_failed'));
       return;
     }
 
@@ -8398,7 +8411,7 @@ import * as Modals from './modalManager.js';
 
     await loadDocument(draftId);
     _renderComposeAttachments();
-    if (uiModule) uiModule.showToast(`Reply draft ready — "${att.filename}" attached`);
+    if (uiModule) uiModule.showToast(t('document.reply_draft_ready', { filename: att.filename }));
   }
 
   /** Save manual edits */
@@ -8424,12 +8437,12 @@ import * as Modals from './modalManager.js';
         docs.get(activeDocId).content = textarea.value;
       }
       _syncDocIndicator();
-      if (!silent && uiModule) uiModule.showToast('Document saved');
+      if (!silent && uiModule) uiModule.showToast(t('document.saved'));
     } catch (e) {
       console.error('Failed to save document:', e);
       const now = Date.now();
       if (uiModule && (!silent || now - _lastAutoSaveErrorAt > 10000)) {
-        uiModule.showError(silent ? 'Autosave failed' : 'Failed to save document');
+        uiModule.showError(silent ? t('document.autosave_failed') : t('document.save_failed'));
         _lastAutoSaveErrorAt = now;
       }
     }
@@ -8579,7 +8592,7 @@ import * as Modals from './modalManager.js';
           }
         }
       } catch (err) {
-        if (uiModule && uiModule.showError) uiModule.showError('Import failed: ' + (err.message || err));
+        if (uiModule && uiModule.showError) uiModule.showError(t('document.import_failed', { msg: err.message || err }));
       } finally {
         fi.value = '';
         fi.remove();
@@ -8699,7 +8712,7 @@ import * as Modals from './modalManager.js';
     a.download = _getExportBaseName() + '.html';
     a.click();
     URL.revokeObjectURL(a.href);
-    if (uiModule) uiModule.showToast('Exported as HTML');
+    if (uiModule) uiModule.showToast(t('document.exported_html'));
   }
 
   async function exportAsPdf() {
@@ -8709,7 +8722,7 @@ import * as Modals from './modalManager.js';
     try {
       await ensureHtml2Pdf();
     } catch (e) {
-      if (uiModule) uiModule.showError('Failed to load PDF library');
+      if (uiModule) uiModule.showError(t('document.load_pdf_library_failed'));
       return;
     }
     const lang = document.getElementById('doc-language-select')?.value || '';
@@ -8733,7 +8746,7 @@ import * as Modals from './modalManager.js';
       html2canvas: { scale: 2 },
       jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
     }).from(container).save();
-    if (uiModule) uiModule.showToast('Exporting PDF...');
+    if (uiModule) uiModule.showToast(t('document.exporting_pdf'));
   }
 
   async function exportAsDocx() {
@@ -8743,7 +8756,7 @@ import * as Modals from './modalManager.js';
     try {
       await ensureDocx();
     } catch (e) {
-      if (uiModule) uiModule.showError('Failed to load DOCX library');
+      if (uiModule) uiModule.showError(t('document.load_docx_library_failed'));
       return;
     }
     const text = textarea.value || '';
@@ -8781,7 +8794,7 @@ import * as Modals from './modalManager.js';
     a.download = baseName + '.docx';
     a.click();
     URL.revokeObjectURL(a.href);
-    if (uiModule) uiModule.showToast('Exported as DOCX');
+    if (uiModule) uiModule.showToast(t('document.exported_docx'));
   }
 
   /** Delete the active document */
@@ -8808,10 +8821,10 @@ import * as Modals from './modalManager.js';
         activeDocId = null;
         closePanel();
       }
-      if (uiModule) uiModule.showToast('Document deleted');
+      if (uiModule) uiModule.showToast(t('common.document_deleted'));
     } catch (e) {
       console.error('Failed to delete document:', e);
-      if (uiModule) uiModule.showError('Failed to delete document');
+      if (uiModule) uiModule.showError(t('document.delete_failed'));
     }
   }
 
@@ -9921,10 +9934,10 @@ import * as Modals from './modalManager.js';
         d.version = doc.version_count || 1;
       }
       await loadVersionHistory();
-      if (uiModule) uiModule.showToast(`Restored to v${num}`);
+      if (uiModule) uiModule.showToast(t('document.restored_to_version', { num: num }));
     } catch (e) {
       console.error('Failed to restore version:', e);
-      if (uiModule) uiModule.showError('Failed to restore version');
+      if (uiModule) uiModule.showError(t('document.restore_version_failed'));
     }
   }
 
@@ -10060,6 +10073,7 @@ const documentModule = {
   newDocument,
   loadDocument,
   injectFreshDoc,
+  replaceEmailReplyBody,
   ensurePaneMounted: _ensureDocPaneMounted,
   loadSessionDocs,
   ensureDocPanel,

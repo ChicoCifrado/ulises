@@ -1,0 +1,23 @@
+{
+  "ai_interaction": {
+    "pipeline_format": "Each line must be: model | instruction (or use JSON format)",
+    "pipeline_no_steps": "No pipeline steps provided",
+    "pipeline_max_steps": "Maximum {max} steps allowed",
+    "pipeline_step_requires": "Step {num}: both 'model' and 'instruction' are required",
+    "pipeline_step_error": "Step {num}: {error}",
+    "pipeline_failed": "Pipeline failed at step {num}: {error}",
+    "memory_not_found": "Memory '{id}' not found",
+    "memory_text_empty": "Memory text cannot be empty",
+    "memory_new_text_empty": "New text cannot be empty",
+    "no_image_model": "No image model found. Configure one in Admin → Image Generation.",
+    "image_gen_failed": "Image generation failed (HTTP {code}): {error}",
+    "no_images_returned": "No images returned from API",
+    "unsafe_image_url": "Image API returned unsafe image URL: {reason}",
+    "unexpected_image_format": "Image API returned unexpected format (no b64_json or url)",
+    "image_gen_timed_out": "Image generation timed out (300s). The model may be overloaded — try again or use quality=low.",
+    "image_gen_error": "Image generation error: {error}",
+    "memory_manager_unavailable": "Memory manager not available",
+    "rag_manager_unavailable": "RAG manager not available",
+    "docs_manager_unavailable": "Personal docs manager not available"
+  }
+}

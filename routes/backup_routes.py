@@ -6,6 +6,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from core.middleware import require_admin
+from core.translations import t
 from src.auth_helpers import get_current_user
 from src.settings import load_settings, save_settings, load_features, save_features
 
@@ -67,10 +68,10 @@ def setup_backup_routes(memory_manager, preset_manager, skills_manager) -> APIRo
         try:
             body = await request.json()
         except Exception:
-            raise HTTPException(400, "Invalid JSON")
+            raise HTTPException(400, t("backup.invalid_json"))
 
         if not isinstance(body, dict):
-            raise HTTPException(400, "Expected a JSON object")
+            raise HTTPException(400, t("backup.expected_object"))
 
         imported = []
 

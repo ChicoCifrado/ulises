@@ -1,0 +1,26 @@
+{
+  "compare": {
+    "all_verified": "Todos los modelos verificados",
+    "model_failed": "{{name}} falló: {{error}}",
+    "verified": "{{count}} modelo{{s}} verificado{{s}}",
+    "mode_blind": "Modo: Ciego ",
+    "mode_normal": "Modo: ",
+    "mode_shuffle_off": "Modo: Aleatorio desactivado",
+    "mode_shuffle_on": "Modo: Aleatorio activado",
+    "mode_shuffle_blind": "Modo: Aleatorio activado · Ciego activado",
+    "mode_save": "Modo: Guardar ",
+    "copied_to_clipboard": "Comparación copiada al portapapeles",
+    "prompt_copied": "¡Prompt copiado!",
+    "a_model": "un modelo",
+    "compare_failed": "Error al comparar: {{message}}",
+    "failed_to_load_models": "Error al cargar modelos",
+    "mode_blind_off": "Modo ciego: Desactivado",
+    "mode_blind_on": "Modo ciego: Activado",
+    "mode_parallel": "Modo paralelo",
+    "mode_save_off": "Guardar: No",
+    "mode_save_on": "Guardar: Sí",
+    "mode_sequential": "Modo secuencial",
+    "search_failed": "Error en la búsqueda: {{message}}",
+    "select_at_least_one": "Selecciona al menos un modelo"
+  }
+}

@@ -26,6 +26,7 @@ export async function loadMarkdown() {
   globalThis.MutationObserver = class { observe() {} };
 
   let src = fs.readFileSync(path.join(REPO, 'static/js/markdown.js'), 'utf8');
+  src = src.replace(/import \{ t \} from ['"]\.\/i18n\.js['"];/, 'const t = (key) => key;');
   src = src.replace(/import uiModule from ['"]\.\/ui\.js['"];/, '');
   src = src.replace(
     /import \{ splitTableRow \} from ['"]\.\/markdown\/tableRow\.js['"];/,

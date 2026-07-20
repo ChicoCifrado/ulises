@@ -1,0 +1,21 @@
+{
+  "upload": {
+    "access_denied": "Acceso denegado",
+    "not_found": "Archivo no encontrado",
+    "no_files": "No se subieron archivos",
+    "file_too_large": "El archivo excede el límite de {limit}",
+    "unsupported_type": "Tipo de archivo no soportado",
+    "all_failed": "Todas las cargas de archivos fallaron",
+    "stats_failed": "Error al obtener las estadísticas de carga",
+    "invalid_id": "ID de archivo inválido",
+    "not_image": "No es una imagen",
+    "vision_failed": "Error en el análisis de visión: {error}",
+    "text_must_be_string": "El texto debe ser una cadena",
+    "upload_failed": "Error al subir: {error}",
+    "save_failed": "Error al guardar el archivo: {error}",
+    "handler_not_configured": "Manejador de carga no configurado",
+    "file_empty": "El archivo está vacío",
+    "file_type_not_allowed": "Tipo de archivo no permitido: {content_type}",
+    "rate_limited": "Límite de velocidad de carga alcanzado"
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "calendar": {
+    "not_found": "Calendar not found",
+    "event_not_found": "Event not found",
+    "password_required": "Password is required",
+    "account_not_found": "Account not found",
+    "missing_credentials": "Missing URL, username, or password",
+    "auth_failed": "Auth failed — check username/password",
+    "forbidden": "Forbidden — user can't access that URL",
+    "not_found_url": "Not found — check the URL path",
+    "redirect_not_followed": "Redirects are not followed for CalDAV safety; use the final URL",
+    "connection_refused": "Connection refused: {error}",
+    "connection_timed_out": "Connection timed out",
+    "http_error": "HTTP {code}",
+    "create_failed": "Failed to create event",
+    "update_failed": "Failed to update event",
+    "delete_failed": "Failed to delete event",
+    "create_calendar_failed": "Failed to create calendar",
+    "update_calendar_failed": "Failed to update calendar",
+    "delete_calendar_failed": "Failed to delete calendar",
+    "list_calendars_failed": "Failed to list calendars",
+    "list_events_failed": "Failed to list events",
+    "ics_import_failed": "Failed to import ICS: {error}",
+    "ics_export_failed": "Failed to export ICS",
+    "text_required": "Text is required",
+    "no_llm": "No LLM endpoint configured",
+    "llm_failed": "LLM call failed: {error}",
+    "could_not_extract_json": "Could not extract JSON",
+    "invalid_json": "Invalid JSON: {error}",
+    "no_start_time": "Model did not produce a start time"
+  }
+}

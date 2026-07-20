@@ -32,6 +32,7 @@ import { handleVote, buildVoteBar, addFinishBadge, spawnConfetti, _saveVote, reg
 import { showScoreboard } from './scoreboard.js';
 
 // ── External dependency imports ──
+import { t } from '../i18n.js';
 import Storage from '../storage.js';
 import uiModule from '../ui.js';
 import sessionModule from '../sessions.js';
@@ -230,7 +231,7 @@ async function deactivate(teardown) {
 /** Build the compare UI: sessions, header bar, grid of panes, vote bar, eval dropdown. */
 async function _buildCompareUI() {
   if (state._selectedModels.length < 1) {
-    if (uiModule) uiModule.showError('Select at least 1 model');
+    if (uiModule) uiModule.showError(t('compare.select_at_least_one'));
     return;
   }
 
@@ -873,7 +874,7 @@ async function _executeCompare(message) {
       buildVoteBar(n);
     } catch (err) {
       console.error('Search compare error:', err);
-      if (uiModule) uiModule.showError('Search compare failed: ' + err.message);
+      if (uiModule) uiModule.showError(t('compare.search_failed', { message: err.message }));
     } finally {
       state._streaming = false;
       _setSendBtn('send');
@@ -1003,7 +1004,7 @@ async function _executeCompare(message) {
 
   } catch (err) {
     console.error('Compare error:', err);
-    if (uiModule) uiModule.showError('Compare failed: ' + err.message);
+    if (uiModule) uiModule.showError(t('compare.compare_failed', { message: err.message }));
   } finally {
     state._streaming = false;
     _setSendBtn('send');
@@ -1107,9 +1108,9 @@ async function _exportCopyMarkdown(_btn) {
       document.body.appendChild(ta);
       ta.select(); document.execCommand('copy'); ta.remove();
     }
-    try { window.uiModule?.showToast?.('Copied comparison to clipboard'); } catch {}
+    try { window.uiModule?.showToast?.(t('compare.copied_to_clipboard')); } catch {}
   } catch (e) {
-    try { window.uiModule?.showToast?.('Copy failed'); } catch {}
+    try { window.uiModule?.showToast?.(t('common.copy_failed')); } catch {}
   }
 }
 
@@ -1425,7 +1426,7 @@ function removeOverlays() {
 async function showShufflePoolEditor() {
   let models;
   try { models = await fetchModels(); } catch (e) {
-    if (uiModule) uiModule.showError('Failed to load models');
+    if (uiModule) uiModule.showError(t('compare.failed_to_load_models'));
     return;
   }
 

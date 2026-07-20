@@ -11,6 +11,7 @@ from sqlalchemy import case, func, or_
 from core.database import SessionLocal, Document, DocumentVersion
 from core.database import Session as DbSession
 from src.auth_helpers import get_current_user
+from core.translations import t
 from src.constants import MAIL_ATTACHMENTS_DIR
 
 logger = logging.getLogger(__name__)
@@ -19,9 +20,9 @@ logger = logging.getLogger(__name__)
 def _get_session_or_404(db, session_id: str, user: Optional[str]):
     session = db.query(DbSession).filter(DbSession.id == session_id).first()
     if not session:
-        raise HTTPException(404, "Session not found")
+        raise HTTPException(404, t("document.session_not_found"))
     if user and session.owner != user:
-        raise HTTPException(404, "Session not found")
+        raise HTTPException(404, t("document.session_not_found"))
     return session
 
 
@@ -78,7 +79,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
         try:
             return load_pymupdf_for_pdf_viewer()
         except RuntimeError as exc:
-            raise HTTPException(503, str(exc)) from exc
+            raise HTTPException(503, t("document.pdf_viewer_unavailable").format(error=str(exc))) from exc
 
     # ---- POST /api/document ----
     @router.post("/api/document")
@@ -135,7 +136,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
                 document_id=doc_id,
                 version_number=1,
                 content=req.content,
-                summary="Initial version",
+                summary=t("document.version_summary_initial"),
                 source="user",
             )
             db.add(doc)
@@ -153,7 +154,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
         except Exception as e:
             db.rollback()
             logger.error(f"Failed to create document: {e}")
-            raise HTTPException(500, f"Failed to create document: {e}")
+            raise HTTPException(500, t("document.create_failed").format(error=str(e)))
         finally:
             db.close()
 
@@ -194,7 +195,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
                 db.close()
 
         if upload_handler is None:
-            raise HTTPException(500, "Upload handler not configured")
+            raise HTTPException(500, t("document.upload_handler_not_configured"))
 
         client_ip = request.client.host if request.client else "unknown"
         try:
@@ -203,12 +204,12 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             raise
         except Exception as e:
             logger.error(f"PDF import save_upload failed: {e}")
-            raise HTTPException(500, f"Upload failed: {e}")
+            raise HTTPException(500, t("document.upload_failed").format(error=str(e)))
 
         upload_id = meta["id"]
         pdf_path = _locate_current_user_upload(request, upload_id, user)
         if not pdf_path:
-            raise HTTPException(500, "Saved PDF could not be located")
+            raise HTTPException(500, t("document.saved_pdf_not_found"))
 
         title = os.path.splitext(meta.get("original_name") or meta.get("name") or upload_id)[0]
         try:
@@ -241,13 +242,13 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             )
 
         if not doc_id:
-            raise HTTPException(500, "Failed to create document for PDF")
+            raise HTTPException(500, t("document.pdf_create_failed"))
 
         db = SessionLocal()
         try:
             doc = db.query(Document).filter(Document.id == doc_id).first()
             if not doc:
-                raise HTTPException(500, "Created document not found")
+                raise HTTPException(500, t("document.created_doc_not_found"))
             # The PDF doc creators stamp owner from the session only; a
             # session-less library import leaves owner NULL, which the Library's
             # owner filter then hides. Stamp the requesting user so it shows.
@@ -377,7 +378,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             }
         except Exception as e:
             logger.error(f"Failed to fetch document library: {e}")
-            raise HTTPException(500, f"Failed to fetch document library: {e}")
+            raise HTTPException(500, t("document.library_fetch_failed").format(error=str(e)))
         finally:
             db.close()
 
@@ -388,7 +389,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
         db = SessionLocal()
         try:
             if not user:
-                raise HTTPException(403, "Authentication required")
+                raise HTTPException(403, t("document.auth_required"))
             # v2 review HIGH-9: raise 403 explicitly when the caller
             # can't see this session, instead of returning [] which the
             # UI treats identically to "no docs" and silently masks
@@ -399,7 +400,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             )
             if user:
                 q = q.filter(or_(Document.owner == user, Document.owner.is_(None)))
-            docs = q.order_by(Document.created_at.desc()).all()
+            docs = q.order_by(Document.created_at.desc()).limit(500).all()
             return [_doc_to_dict(d) for d in docs]
         finally:
             db.close()
@@ -412,7 +413,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
         try:
             doc = db.query(Document).filter(Document.id == doc_id).first()
             if not doc:
-                raise HTTPException(404, "Document not found")
+                raise HTTPException(404, t("document.not_found"))
             _verify_doc_owner(db, doc, user)
             return _doc_to_dict(doc)
         finally:
@@ -426,7 +427,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
         try:
             doc = db.query(Document).filter(Document.id == doc_id).first()
             if not doc:
-                raise HTTPException(404, "Document not found")
+                raise HTTPException(404, t("document.not_found"))
             _verify_doc_owner(db, doc, user)
             doc.archived = bool(archived)
             db.commit()
@@ -453,26 +454,26 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
         try:
             doc = db.query(Document).filter(Document.id == doc_id).first()
             if not doc:
-                raise HTTPException(404, "Document not found")
+                raise HTTPException(404, t("document.not_found"))
             _verify_doc_owner(db, doc, user)
 
             content = doc.current_content or ""
             upload_id = find_source_upload_id(content)
             if not upload_id:
-                raise HTTPException(400, "Document is not a PDF — no pdf_source marker found")
+                raise HTTPException(400, t("document.not_a_pdf"))
 
             pdf_path = _locate_current_user_upload(request, upload_id, user)
             if not pdf_path:
-                raise HTTPException(404, "Source PDF could not be located")
+                raise HTTPException(404, t("document.source_pdf_not_located"))
 
             try:
                 body_text = strip_pdf_content_marker(_process_pdf(pdf_path, owner=user))
             except Exception as e:
                 logger.error(f"extract_pdf_text failed for {pdf_path}: {e}")
-                raise HTTPException(500, f"Extraction failed: {e}")
+                raise HTTPException(500, t("document.extraction_failed").format(error=str(e)))
 
             if not body_text:
-                return {"ok": True, "id": doc_id, "extracted": False, "reason": "No readable content"}
+                return {"ok": True, "id": doc_id, "extracted": False, "reason": t("document.no_readable_content")}
 
             # Preserve everything up through the title (front-matter marker +
             # first H1) and replace the rest with the freshly extracted text.
@@ -482,11 +483,11 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             doc.current_content = head + body_text.strip() + "\n"
             doc.version_count = (doc.version_count or 1) + 1
             db.add(DocumentVersion(
-                id=str(__import__("uuid").uuid4()),
+                id=str(uuid.uuid4()),
                 document_id=doc_id,
                 version_number=doc.version_count,
                 content=doc.current_content,
-                summary="PDF text re-extracted (OCR)",
+                summary=t("document.version_summary_ocr"),
                 source="ocr",
             ))
             db.commit()
@@ -508,7 +509,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             data = {}
         ids = data.get("ids") or []
         if not ids:
-            raise HTTPException(400, "No documents specified")
+            raise HTTPException(400, t("document.no_documents_specified"))
         _ext = {
             "javascript": ".js", "python": ".py", "html": ".html", "css": ".css",
             "markdown": ".md", "json": ".json", "yaml": ".yml", "bash": ".sh",
@@ -544,7 +545,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
                     zf.writestr(name, doc.current_content or "")
                     wrote += 1
             if not wrote:
-                raise HTTPException(404, "No documents found")
+                raise HTTPException(404, t("document.no_documents_found_export"))
             return Response(
                 content=buf.getvalue(),
                 media_type="application/zip",
@@ -566,7 +567,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
         try:
             doc = db.query(Document).filter(Document.id == doc_id).first()
             if not doc:
-                raise HTTPException(404, "Document not found")
+                raise HTTPException(404, t("document.not_found"))
             _verify_doc_owner(db, doc, user)
 
             # Skip if content is identical
@@ -602,7 +603,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
                     document_id=doc_id,
                     version_number=new_ver,
                     content=req.content,
-                    summary=req.summary or "Manual edit",
+                    summary=req.summary or t("document.version_summary_manual"),
                     source="user",
                 )
                 doc.version_count = new_ver
@@ -616,7 +617,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             raise
         except Exception as e:
             db.rollback()
-            raise HTTPException(500, f"Failed to update document: {e}")
+            raise HTTPException(500, t("document.update_failed").format(error=str(e)))
         finally:
             db.close()
 
@@ -628,7 +629,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
         try:
             doc = db.query(Document).filter(Document.id == doc_id).first()
             if not doc:
-                raise HTTPException(404, "Document not found")
+                raise HTTPException(404, t("document.not_found"))
             _verify_doc_owner(db, doc, user)
             if req.title is not None:
                 doc.title = req.title
@@ -655,7 +656,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             raise
         except Exception as e:
             db.rollback()
-            raise HTTPException(500, str(e))
+            raise HTTPException(500, t("document.patch_failed").format(error=str(e)))
         finally:
             db.close()
 
@@ -667,7 +668,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
         try:
             doc = db.query(Document).filter(Document.id == doc_id).first()
             if not doc:
-                raise HTTPException(404, "Document not found")
+                raise HTTPException(404, t("document.not_found"))
             _verify_doc_owner(db, doc, user)
             doc.is_active = False
             # Closed/deleted — drop the in-memory active-doc pointer so it isn't
@@ -683,7 +684,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             raise
         except Exception as e:
             db.rollback()
-            raise HTTPException(500, str(e))
+            raise HTTPException(500, t("document.delete_failed").format(error=str(e)))
         finally:
             db.close()
 
@@ -696,11 +697,11 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             # Verify ownership before listing versions
             doc = db.query(Document).filter(Document.id == doc_id).first()
             if not doc:
-                raise HTTPException(404, "Document not found")
+                raise HTTPException(404, t("document.not_found"))
             _verify_doc_owner(db, doc, user)
             versions = db.query(DocumentVersion).filter(
                 DocumentVersion.document_id == doc_id
-            ).order_by(DocumentVersion.version_number.desc()).all()
+            ).order_by(DocumentVersion.version_number.desc()).limit(500).all()
             return [{
                 "id": v.id,
                 "version_number": v.version_number,
@@ -721,14 +722,14 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             # Verify ownership
             doc = db.query(Document).filter(Document.id == doc_id).first()
             if not doc:
-                raise HTTPException(404, "Document not found")
+                raise HTTPException(404, t("document.not_found"))
             _verify_doc_owner(db, doc, user)
             ver = db.query(DocumentVersion).filter(
                 DocumentVersion.document_id == doc_id,
                 DocumentVersion.version_number == num,
             ).first()
             if not ver:
-                raise HTTPException(404, "Version not found")
+                raise HTTPException(404, t("document.version_not_found"))
             return _version_to_dict(ver)
         finally:
             db.close()
@@ -741,7 +742,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
         try:
             doc = db.query(Document).filter(Document.id == doc_id).first()
             if not doc:
-                raise HTTPException(404, "Document not found")
+                raise HTTPException(404, t("document.not_found"))
             _verify_doc_owner(db, doc, user)
 
             old_ver = db.query(DocumentVersion).filter(
@@ -749,7 +750,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
                 DocumentVersion.version_number == num,
             ).first()
             if not old_ver:
-                raise HTTPException(404, "Version not found")
+                raise HTTPException(404, t("document.version_not_found"))
 
             new_ver_num = doc.version_count + 1
             ver = DocumentVersion(
@@ -757,7 +758,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
                 document_id=doc_id,
                 version_number=new_ver_num,
                 content=old_ver.content,
-                summary=f"Restored from v{num}",
+                summary=t("document.version_summary_restored").format(num=num),
                 source="user",
             )
             doc.current_content = old_ver.content
@@ -770,7 +771,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             raise
         except Exception as e:
             db.rollback()
-            raise HTTPException(500, str(e))
+            raise HTTPException(500, t("document.restore_failed").format(error=str(e)))
         finally:
             db.close()
 
@@ -788,7 +789,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
                 .filter((Document.archived == False) | (Document.archived.is_(None)))
             )
             q = _owner_session_filter(q, user)
-            docs = q.all()
+            docs = q.limit(1000).all()
             fixed_titles = 0
             deleted = 0
 
@@ -798,7 +799,13 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             from src.document_actions import _JUNK_TITLES
 
             to_delete = []
+            now = datetime.now(timezone.utc).replace(tzinfo=None)
+
             for doc in docs:
+                # Skip freshly created documents to avoid deleting them while the user is actively editing
+                if doc.created_at and (now - doc.created_at).total_seconds() < 900:  # 15 minutes
+                    continue
+
                 content = (doc.current_content or "").strip()
                 title_raw = (doc.title or "").strip()
                 title = title_raw.lower()
@@ -836,10 +843,6 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
                     to_delete.append(doc); deleted += 1; continue
                 if title in _JUNK_TITLES:
                     to_delete.append(doc); deleted += 1; continue
-                if real_len < 30:
-                    to_delete.append(doc); deleted += 1; continue
-                if "\n" not in content and real_len < 50:
-                    to_delete.append(doc); deleted += 1; continue
 
                 # Fix empty or placeholder titles on survivors
                 if not title_raw or title_raw == "Untitled":
@@ -859,7 +862,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
                 .filter((Document.current_content == None) | (Document.current_content == ""))
             )
             inactive_q = _owner_session_filter(inactive_q, user)
-            inactive_docs = inactive_q.all()
+            inactive_docs = inactive_q.limit(1000).all()
             for doc in inactive_docs:
                 db.delete(doc)
             deleted += len(inactive_docs)
@@ -868,12 +871,12 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             return {
                 "fixed_titles": fixed_titles,
                 "deleted": deleted,
-                "message": f"Fixed {fixed_titles} title{'s' if fixed_titles != 1 else ''}, removed {deleted} empty document{'s' if deleted != 1 else ''}",
+                "message": t("document.tidy_summary").format(fixed=fixed_titles, deleted=deleted),
             }
         except Exception as e:
             db.rollback()
             logger.error(f"Document tidy failed: {e}")
-            raise HTTPException(500, f"Tidy failed: {e}")
+            raise HTTPException(500, t("document.tidy_failed").format(error=str(e)))
         finally:
             db.close()
 
@@ -892,7 +895,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             # Fall back to default endpoint
             url, model, headers = resolve_endpoint("default", owner=user or None)
         if not url or not model:
-            raise HTTPException(500, "No endpoint configured for AI tidy")
+            raise HTTPException(500, t("document.no_ai_tidy_endpoint"))
 
         db = SessionLocal()
         try:
@@ -903,12 +906,12 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
                 .filter((Document.archived == False) | (Document.archived.is_(None)))
             )
             q = _owner_session_filter(q, user)
-            docs = q.all()
+            docs = q.limit(500).all()
 
             # Only review docs that haven't been reviewed yet
             to_review = [d for d in docs if not d.tidy_verdict]
             if not to_review:
-                return {"deleted": 0, "reviewed": 0, "message": "All documents already reviewed"}
+                return {"deleted": 0, "reviewed": 0, "message": t("document.all_reviewed")}
 
             # Build a batch prompt — review up to 30 at a time
             batch = to_review[:30]
@@ -939,7 +942,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             import re
             match = re.search(r'\[.*?\]', response, re.DOTALL)
             if not match:
-                raise HTTPException(500, "AI returned invalid response")
+                raise HTTPException(500, t("document.ai_invalid_response"))
 
             import json as _json
             verdicts = _json.loads(match.group())
@@ -963,14 +966,14 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
                 "deleted": deleted,
                 "reviewed": reviewed,
                 "remaining": len(to_review) - len(batch),
-                "message": f"Reviewed {reviewed}, removed {deleted} junk document{'s' if deleted != 1 else ''}",
+                "message": t("document.ai_tidy_summary").format(reviewed=reviewed, deleted=deleted),
             }
         except HTTPException:
             raise
         except Exception as e:
             db.rollback()
             logger.error(f"AI tidy failed: {e}")
-            raise HTTPException(500, f"AI tidy failed: {e}")
+            raise HTTPException(500, t("document.ai_tidy_failed").format(error=str(e)))
         finally:
             db.close()
 
@@ -989,20 +992,20 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
         try:
             doc = db.query(Document).filter(Document.id == doc_id).first()
             if not doc:
-                raise HTTPException(404, "Document not found")
+                raise HTTPException(404, t("document.not_found"))
             _verify_doc_owner(db, doc, user)
 
             upload_id = find_source_upload_id(doc.current_content or "")
             if not upload_id:
-                raise HTTPException(400, "Document is not linked to a source PDF")
+                raise HTTPException(400, t("document.not_linked_to_pdf"))
 
             pdf_path = _locate_current_user_upload(request, upload_id, user)
             if not pdf_path:
-                raise HTTPException(404, f"Source PDF {upload_id} not found in uploads")
+                raise HTTPException(404, t("document.source_pdf_not_found_in_uploads").format(upload_id=upload_id))
 
             fields = load_field_sidecar(pdf_path)
             if not fields:
-                raise HTTPException(404, "Field schema sidecar missing for source PDF")
+                raise HTTPException(404, t("document.field_schema_missing"))
 
             values = parse_markdown_to_values(doc.current_content or "")
             field_meta = {f["name"]: f for f in fields}
@@ -1053,14 +1056,14 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
         try:
             doc = db.query(Document).filter(Document.id == doc_id).first()
             if not doc:
-                raise HTTPException(404, "Document not found")
+                raise HTTPException(404, t("document.not_found"))
             _verify_doc_owner(db, doc, user)
             upload_id = find_source_upload_id(doc.current_content or "")
             if not upload_id:
-                raise HTTPException(400, "Document is not linked to a source PDF")
+                raise HTTPException(400, t("document.not_linked_to_pdf"))
             pdf_path = _locate_current_user_upload(request, upload_id, user)
             if not pdf_path:
-                raise HTTPException(404, f"Source PDF {upload_id} not found")
+                raise HTTPException(404, t("document.source_pdf_not_found").format(upload_id=upload_id))
 
             fitz = _load_pdf_viewer_fitz()
             schema = load_field_sidecar(pdf_path) or []
@@ -1120,14 +1123,14 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
         try:
             doc = db.query(Document).filter(Document.id == doc_id).first()
             if not doc:
-                raise HTTPException(404, "Document not found")
+                raise HTTPException(404, t("document.not_found"))
             _verify_doc_owner(db, doc, user)
             upload_id = find_source_upload_id(doc.current_content or "")
             if not upload_id:
-                raise HTTPException(400, "Document is not linked to a source PDF")
+                raise HTTPException(400, t("document.not_linked_to_pdf"))
             pdf_path = _locate_current_user_upload(request, upload_id, user)
             if not pdf_path:
-                raise HTTPException(404, "Source PDF not found")
+                raise HTTPException(404, t("document.source_pdf_not_found"))
         finally:
             db.close()
 
@@ -1135,7 +1138,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
         pdf_doc = fitz.open(pdf_path)
         try:
             if page_no < 1 or page_no > pdf_doc.page_count:
-                raise HTTPException(404, "Page out of range")
+                raise HTTPException(404, t("document.page_out_of_range"))
             page = pdf_doc[page_no - 1]
             mat = fitz.Matrix(_PDF_RENDER_SCALE, _PDF_RENDER_SCALE)
             pix = page.get_pixmap(matrix=mat, alpha=False)
@@ -1168,21 +1171,21 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
         body = await request.json() if request.headers.get("content-type", "").startswith("application/json") else {}
         instruction = (body or {}).get("instruction", "").strip()
         if not instruction:
-            raise HTTPException(400, "instruction is required")
+            raise HTTPException(400, t("document.instruction_required"))
 
         user = get_current_user(request)
         db = SessionLocal()
         try:
             doc = db.query(Document).filter(Document.id == doc_id).first()
             if not doc:
-                raise HTTPException(404, "Document not found")
+                raise HTTPException(404, t("document.not_found"))
             _verify_doc_owner(db, doc, user)
             upload_id = find_source_upload_id(doc.current_content or "")
             if not upload_id:
-                raise HTTPException(400, "Document is not linked to a source PDF")
+                raise HTTPException(400, t("document.not_linked_to_pdf"))
             pdf_path = _locate_current_user_upload(request, upload_id, user)
             if not pdf_path:
-                raise HTTPException(404, "Source PDF not found")
+                raise HTTPException(404, t("document.source_pdf_not_found"))
         finally:
             db.close()
 
@@ -1192,7 +1195,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
         try:
             url, model_id, headers = _resolve_vl_model(vl_model, owner=user)
         except Exception as e:
-            raise HTTPException(503, f"No vision model available: {e}")
+            raise HTTPException(503, t("document.no_vision_model").format(error=str(e)))
 
         system_prompt = (
             "You analyze rendered PDF page images and propose values to fill in. "
@@ -1323,14 +1326,14 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
         try:
             doc = db.query(Document).filter(Document.id == doc_id).first()
             if not doc:
-                raise HTTPException(404, "Document not found")
+                raise HTTPException(404, t("document.not_found"))
             _verify_doc_owner(db, doc, user)
             upload_id = find_source_upload_id(doc.current_content or "")
             if not upload_id:
-                raise HTTPException(400, "Document is not linked to a source PDF")
+                raise HTTPException(400, t("document.not_linked_to_pdf"))
             pdf_path = _locate_current_user_upload(request, upload_id, user)
             if not pdf_path:
-                raise HTTPException(404, f"Source PDF {upload_id} not found")
+                raise HTTPException(404, t("document.source_pdf_not_found").format(upload_id=upload_id))
 
             # Fail fast with a clear 503 if the optional PyMuPDF dependency
             # is missing — fill_fields/stamp_annotations will otherwise
@@ -1346,7 +1349,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             except Exception as e:
                 logger.error(f"render_pdf fill_fields failed for {doc_id}: {e}")
                 _cleanup_temps()
-                raise HTTPException(500, f"PDF render failed: {e}")
+                raise HTTPException(500, t("document.pdf_render_failed").format(error=str(e)))
 
             annotations = parse_markdown_annotations(doc.current_content or "")
             if annotations:
@@ -1421,16 +1424,16 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
         try:
             doc = db.query(Document).filter(Document.id == doc_id).first()
             if not doc:
-                raise HTTPException(404, "Document not found")
+                raise HTTPException(404, t("document.not_found"))
             _verify_doc_owner(db, doc, user)
 
             upload_id = find_source_upload_id(doc.current_content or "")
             if not upload_id:
-                raise HTTPException(400, "Document is not linked to a source PDF")
+                raise HTTPException(400, t("document.not_linked_to_pdf"))
 
             pdf_path = _locate_current_user_upload(request, upload_id, user)
             if not pdf_path:
-                raise HTTPException(404, f"Source PDF {upload_id} not found in uploads")
+                raise HTTPException(404, t("document.source_pdf_not_found_in_uploads").format(upload_id=upload_id))
 
             schema = load_field_sidecar(pdf_path) or []
             sig_field_names = {f["name"] for f in schema if f.get("type") == "signature"}
@@ -1469,7 +1472,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             except Exception as e:
                 logger.error(f"fill_fields failed for doc {doc_id}: {e}")
                 _cleanup_temps()
-                raise HTTPException(500, f"PDF fill failed: {e}")
+                raise HTTPException(500, t("document.pdf_fill_failed").format(error=str(e)))
 
             out_path = filled_path
             if stamps:
@@ -1558,19 +1561,19 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
         try:
             doc = db.query(Document).filter(Document.id == doc_id).first()
             if not doc:
-                raise HTTPException(404, "Document not found")
+                raise HTTPException(404, t("document.not_found"))
             _verify_doc_owner(db, doc, user)
 
             if not (doc.source_email_uid and doc.source_email_folder):
-                raise HTTPException(400, "Document has no source email — cannot reply")
+                raise HTTPException(400, t("document.no_source_email"))
 
             # 1) Build the flattened PDF (same pipeline as export_pdf)
             upload_id = find_source_upload_id(doc.current_content or "")
             if not upload_id:
-                raise HTTPException(400, "Document is not linked to a source PDF")
+                raise HTTPException(400, t("document.not_linked_to_pdf"))
             pdf_path = _locate_current_user_upload(request, upload_id, user)
             if not pdf_path:
-                raise HTTPException(404, f"Source PDF {upload_id} not found")
+                raise HTTPException(404, t("document.source_pdf_not_found").format(upload_id=upload_id))
 
             schema = load_field_sidecar(pdf_path) or []
             sig_field_names = {f["name"] for f in schema if f.get("type") == "signature"}

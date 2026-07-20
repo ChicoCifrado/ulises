@@ -1,0 +1,6 @@
+{
+  "cleanup": {
+    "preview_failed": "Error al generar la vista previa de limpieza",
+    "operation_failed": "Error en la operación de limpieza"
+  }
+}

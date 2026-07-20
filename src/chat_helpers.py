@@ -13,6 +13,7 @@ from fastapi import HTTPException
 from fastapi import UploadFile
 from typing import List, Optional
 
+from core.translations import t
 from src.upload_limits import format_byte_limit, get_chat_upload_max_bytes
 
 logger = logging.getLogger(__name__)
@@ -173,14 +174,14 @@ def model_supports_vision(model_name: str, endpoint_url: str = "") -> bool:
 def validate_message(message: str) -> str:
     """Validate message input."""
     if not message:
-        raise HTTPException(status_code=400, detail="Message is required")
+        raise HTTPException(status_code=400, detail=t("message.required"))
 
     message = message.strip()
     if len(message) == 0:
-        raise HTTPException(status_code=400, detail="Message cannot be empty")
+        raise HTTPException(status_code=400, detail=t("message.cannot_be_empty"))
 
     if len(message) > 50000:
-        raise HTTPException(status_code=400, detail="Message exceeds maximum length")
+        raise HTTPException(status_code=400, detail=t("message.exceeds_max_length"))
 
     return message
 
@@ -192,7 +193,7 @@ def validate_file_upload(file: UploadFile) -> UploadFile:
             status_code=400,
             detail={
                 "error": "INVALID_FILE",
-                "message": "No file uploaded or invalid filename"
+                "message": t("message.no_file_or_invalid")
             }
         )
 
@@ -206,7 +207,7 @@ def validate_file_upload(file: UploadFile) -> UploadFile:
                 status_code=400,
                 detail={
                     "error": "EMPTY_FILE",
-                    "message": "File is empty"
+                    "message": t("message.file_empty")
                 }
             )
 
@@ -216,7 +217,7 @@ def validate_file_upload(file: UploadFile) -> UploadFile:
                 status_code=400,
                 detail={
                     "error": "FILE_TOO_LARGE",
-                    "message": f"File size exceeds {format_byte_limit(upload_limit)} limit"
+                    "message": t("upload.file_too_large").format(limit=format_byte_limit(upload_limit))
                 }
             )
     except IOError as e:
@@ -225,7 +226,7 @@ def validate_file_upload(file: UploadFile) -> UploadFile:
             status_code=500,
             detail={
                 "error": "FILE_READ_ERROR",
-                "message": "Error reading uploaded file"
+                "message": t("message.file_read_error")
             }
         )
 
@@ -240,7 +241,7 @@ def validate_file_upload(file: UploadFile) -> UploadFile:
             status_code=400,
             detail={
                 "error": "UNSUPPORTED_FILE_TYPE",
-                "message": f"File type '{ext}' not allowed",
+                "message": t("message.unsupported_file_type").format(ext=ext),
                 "allowed_types": sorted(allowed_extensions)
             }
         )
@@ -263,7 +264,7 @@ def coerce_message_and_session(req_json: dict | None, message: str | None,
                     status_code=400,
                     detail={
                         "error": "MISSING_PARAMETERS",
-                        "message": "Missing 'message' and/or 'session' in request"
+                        "message": t("message.missing_parameters")
                     }
                 )
             message = message or req_json.get("message")
@@ -279,7 +280,7 @@ def coerce_message_and_session(req_json: dict | None, message: str | None,
                 status_code=400,
                 detail={
                     "error": "VALIDATION_ERROR",
-                    "message": "Session ID is required"
+                    "message": t("message.session_id_required")
                 }
             )
         try:
@@ -289,7 +290,7 @@ def coerce_message_and_session(req_json: dict | None, message: str | None,
                 status_code=404,
                 detail={
                     "error": "SESSION_NOT_FOUND",
-                    "message": f"Session '{session}' not found"
+                    "message": t("message.session_not_found").format(session_id=session)
                 }
             )
 
@@ -302,7 +303,7 @@ def coerce_message_and_session(req_json: dict | None, message: str | None,
             status_code=400,
             detail={
                 "error": "INVALID_JSON",
-                "message": "Invalid JSON in request body"
+                "message": t("message.invalid_json_body")
             }
         )
     except Exception as e:
@@ -311,6 +312,6 @@ def coerce_message_and_session(req_json: dict | None, message: str | None,
             status_code=400,
             detail={
                 "error": "REQUEST_PROCESSING_ERROR",
-                "message": "Error processing request"
+                "message": t("message.request_processing_error")
             }
         )

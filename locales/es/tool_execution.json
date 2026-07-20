@@ -1,0 +1,5 @@
+{
+  "tool_execution": {
+    "error": "{tool}: {error}"
+  }
+}

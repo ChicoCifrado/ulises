@@ -1,0 +1,16 @@
+{
+  "integration": {
+    "not_found": "Integración no encontrada: {id}",
+    "disabled": "La integración '{name}' está deshabilitada",
+    "path_must_start_with_slash": "La ruta debe comenzar con /",
+    "path_no_protocol": "La ruta no debe contener un esquema de protocolo",
+    "path_no_fragment": "La ruta no debe contener un fragmento",
+    "request_timed_out": "La solicitud a {name} agotó el tiempo de espera",
+    "request_failed": "Error en la solicitud: {error}",
+    "unexpected_error": "Error inesperado: {error}",
+    "base_url_must_be_http": "La URL base debe comenzar con http:// o https://",
+    "base_url_no_query_fragment": "La URL base no debe contener query string ni fragmento",
+    "base_url_required": "La URL base es requerida",
+    "name_required": "El nombre es requerido"
+  }
+}

@@ -20,7 +20,7 @@ from src.model_context import estimate_tokens
 from src.settings import get_setting
 from src.prompt_security import untrusted_context_message
 from src.tool_security import blocked_tools_for_owner, plan_mode_disabled_tools
-from src.tool_policy import GUIDE_ONLY_DIRECTIVE, ToolPolicy
+from src.tool_policy import GUIDE_ONLY_DIRECTIVE, WEB_TOOL_NAMES, ToolPolicy
 from src.tool_utils import _truncate, get_mcp_manager
 from src.agent_tools import (
     parse_tool_blocks,
@@ -72,6 +72,7 @@ _AGENT_RULES = """\
 - These exact tags execute automatically. For showing code examples, use ```shell, ```sh, ```py, etc. instead.
 - Multiple tool blocks per response OK. 60s timeout per tool, 10K char output limit.
 - Code/content >15 lines → ```create_document (NOT in chat). Short snippets OK in chat.
+- Long-form or structured writing is a document by default when the user asks to write/create/make/generate it and the answer would be more than a short paragraph. Use create_document instead of dumping the full content in chat.
 - Editing an existing document: ALWAYS use ```edit_document with FIND/REPLACE blocks. Do NOT rewrite the whole document with ```update_document unless genuinely changing more than half of it.
 - BIAS TOWARD ACTION on edit requests. If the user says "edit out X", "remove the Y paragraph", "change Z" — JUST DO IT with your best interpretation. Don't ask for clarification on minor ambiguity. The user can undo or re-prompt if wrong.
 - AFTER A TOOL SUCCEEDS, do not second-guess. The success message ("Document edited: v2, 1 edit") means it worked. Reply in ONE short sentence confirming what was done. No re-checking, no replaying the diff in your head, no validation theater.
@@ -118,6 +119,7 @@ _API_AGENT_RULES = """\
 - For web lookup/search/latest/current requests, call `web_search` or `web_fetch`. Do NOT use shell, Python, curl, requests, or scraping code for web lookup unless web tools are unavailable or already failed.
 - Keep answers concise unless the user asks for depth.
 - For long code or content, use document tools instead of pasting large blocks into chat.
+- Long-form or structured writing is a document by default when the user asks to write/create/make/generate it and the answer would be more than a short paragraph. Call create_document instead of dumping the full content in chat.
 - Editing an existing document: ALWAYS use `edit_document` with find/replace. Only use `update_document` for genuine full rewrites (>50% changed) — do NOT echo the entire file back for small edits.
 - If the active editor document is an email draft/compose window, treat that open email as the target for "write this", "write the email", "reply with...", "make it say...", "draft this", and similar requests. Do NOT create another document, search/list/manage documents, or open a different reply unless the user explicitly asks. Edit the open email draft with `edit_document` or `update_document`; preserve To/Cc/Bcc/Subject/In-Reply-To/References/X-* header lines unless the user asks to change them.
 - "Give suggestions / feedback / review / how can I improve this / what would make it better" about the OPEN document → call `suggest_document`, do NOT write a prose list of ideas in chat. It creates inline accept/reject bubbles on the doc. Give concrete `find`/`replace`/`reason` items. To suggest an ADDITION (e.g. "add a bow to the SVG", a new section), set `find` to a short existing anchor snippet and `replace` to that same snippet PLUS the new content. Only answer in prose when no document is open, or the request is purely conceptual with no concrete change to propose.
@@ -274,7 +276,7 @@ _DOMAIN_RULES = {
 }
 
 _DOMAIN_TOOL_MAP = {
-    "web": {"web_search", "web_fetch", "trigger_research", "manage_research"},
+    "web": set(WEB_TOOL_NAMES),
     "documents": {"create_document", "edit_document", "update_document", "suggest_document", "manage_documents"},
     "email": {"list_email_accounts", "list_emails", "read_email", "send_email", "reply_to_email", "bulk_email", "archive_email", "delete_email", "mark_email_read", "resolve_contact", "manage_contact"},
     "cookbook": {"download_model", "serve_model", "serve_preset", "list_serve_presets", "list_served_models", "stop_served_model", "tail_serve_output", "list_downloads", "cancel_download", "search_hf_models", "list_cached_models", "list_cookbook_servers", "adopt_served_model"},
@@ -464,7 +466,7 @@ Bulk delete/archive/mark emails. Use this for "delete all those" after listing e
 {"action": "create_event", "summary": "<event title>", "dtstart": "<natural language or ISO datetime>"}
 ```
 Calendar event management (CalDAV). Actions: `list_events`, `create_event`, `update_event`, `delete_event`, `list_calendars`. \
-For `list_events`: {start?, end?, calendar?}; prefer `start`/`end` for the range, though start_date/end_date and from/to aliases are accepted. \
+For `list_events`: {action: "list_events", start: "YYYY-MM-DDT00:00:00", end: "YYYY-MM-DDT00:00:00", calendar?}; resolve month/week phrases yourself from the Current date and time context and do not pass a loose `query` field. Prefer `start`/`end`; start_time/end_time, start_date/end_date, and from/to aliases are accepted. \
 For `create_event`: {summary, dtstart, dtend?, duration?, calendar?, location?, description?, reminder_minutes?, rrule?}. \
 `dtstart` accepts natural language ("tomorrow at 1pm", "in 2 hours", "next monday 9am") or ISO ("2026-05-12T13:00:00"). \
 If `dtend` omitted, defaults to dtstart+1h (or +1d when `all_day: true`). \
@@ -712,7 +714,7 @@ def _endpoint_lookup_keys(endpoint_url: str) -> List[str]:
     try:
         from src.endpoint_resolver import normalize_base
         add(normalize_base(raw))
-    except Exception:
+    except ImportError:
         pass
     return keys
 
@@ -755,6 +757,38 @@ def _extract_last_user_message(messages: List[Dict]) -> str:
     return ""
 
 
+def _strip_think_blocks(text: str) -> str:
+    """Linear-time equivalent of
+    ``re.sub(r'<think>.*?</think>', '', text, flags=DOTALL|IGNORECASE)``.
+
+    The lazy regex rescans to end-of-string from every ``<think>`` opener when
+    a closer is missing -> O(n^2) on untrusted model output (prompt injection
+    can echo thousands of openers). This forward-only scan pairs each opener
+    with the next closer in a single pass. Output is byte-for-byte identical to
+    the original narrow regex: only literal ``<think>``/``</think>`` (any case)
+    are matched, a dangling opener with no closer is left intact, and an orphan
+    ``</think>`` is never stripped.
+    """
+    if not text:
+        return text
+    lowered = text.lower()
+    parts = []
+    pos = 0
+    while True:
+        start = lowered.find("<think>", pos)
+        if start == -1:
+            parts.append(text[pos:])
+            break
+        end = lowered.find("</think>", start + 7)
+        if end == -1:
+            # No closer for this opener: lazy regex matches nothing here.
+            parts.append(text[pos:])
+            break
+        parts.append(text[pos:start])
+        pos = end + 8  # len("</think>")
+    return "".join(parts)
+
+
 _LOW_SIGNAL_RE = re.compile(r"^[\W_]*$", re.UNICODE)
 _CASUAL_OPENING_RE = re.compile(
     r"^\s*(?:h+i+|hey+|hello+|yo+|sup+|what'?s up|wass?up|hiya|howdy|"
@@ -773,7 +807,12 @@ _EXPLICIT_CONTINUATION_RE = re.compile(
     r"run it|launch it|start it|use that|that one|same|the same|"
     r"first|second|third|the first one|the second one|the third one|"
     r"[123]|[abc]"
-    r")\s*[.!?]*\s*$",
+    # `\s*[.!?]*\s*$` put two \s-matching quantifiers around `[.!?]*`, which
+    # backtracks O(n^2) on a terse reply + whitespace flood (py/polynomial-redos).
+    # `\s*(?:[.!?]+\s*)?$` accepts the same "trailing space/punctuation" tails
+    # (the inner \s* only engages after `[.!?]+`, so no two \s* are adjacent) and
+    # is linear.
+    r")\s*(?:[.!?]+\s*)?$",
     re.IGNORECASE,
 )
 _RETRY_CONTINUATION_RE = re.compile(
@@ -943,6 +982,236 @@ def _classify_agent_request(messages: List[Dict], last_user: str) -> Dict[str, o
     }
 
 
+def _turn_targets_active_document(intent: Dict[str, object], last_user: str, active_document) -> bool:
+    """Return whether an open document should affect this turn.
+
+    The editor can stay open while the user asks unrelated things ("who am I?",
+    "search news"). In those cases injecting document context/tools makes small
+    models overfit to the visible document and call suggest/edit tools. Keep the
+    active document only for explicit document domains or common document-edit
+    continuations.
+    """
+    if active_document is None:
+        return False
+    raw_doc = getattr(active_document, "current_content", "") or ""
+    title_l = (getattr(active_document, "title", "") or "").strip().lower()
+    is_email_doc = (
+        getattr(active_document, "language", None) == "email"
+        or title_l in {"new email", "new mail", "new message"}
+        or ("To:" in raw_doc[:400] and "Subject:" in raw_doc[:400] and "\n---\n" in raw_doc)
+    )
+    if "documents" in (intent.get("domains") or set()):
+        return True
+    text = str(last_user or "").strip().lower()
+    if not text:
+        return False
+    if is_email_doc and re.search(
+        r"\b("
+        r"email|mail|reply|respond|response|draft|compose|send|"
+        r"tell them|tell her|tell him|say|write|make it say|"
+        r"japanese|japan|polite|formal|tone|style"
+        r")\b",
+        text,
+    ):
+        return True
+    if re.search(
+        r"\b(?:make|change|update|fix|edit|rewrite|rework|revise|replace|remove|delete|add|append|insert|set|turn)\b"
+        r".{0,80}\b(?:day\s*\d+|row|rows|column|columns|table|section|chapter|part|paragraph|line|lines|"
+        r"title|heading|body|intro|introduction|conclusion|schedule|itinerary|draft|content)\b",
+        text,
+    ):
+        return True
+    if re.search(
+        r"\b(?:day\s*\d+|row|rows|column|columns|table|section|chapter|part|paragraph|line|lines|"
+        r"title|heading|body|intro|introduction|conclusion|schedule|itinerary)\b"
+        r".{0,80}\b(?:make|change|update|fix|edit|rewrite|rework|revise|replace|remove|delete|add|append|insert|set|turn)\b",
+        text,
+    ):
+        return True
+    if re.search(
+        r"\b(?:add|insert|include|apply|put)\b.+\b(?:to it|to this|there|in it|in this|in the text|in the document)\b",
+        text,
+    ):
+        return True
+    if re.search(
+        r"\b(?:make it|make this|expand it|expand this|extend it|extend this|continue it|continue this)\b.*\b(?:longer|shorter|bigger|smaller|more detailed|more concise|expanded|extended)?\b",
+        text,
+    ):
+        return True
+    return bool(re.search(
+        r"\b("
+        r"document|doc|draft|text|poem|story|essay|outline|letter|paragraph|"
+        r"stanza|line|title|heading|section|sentence|word|caps|uppercase|"
+        r"lowercase|rewrite|reword|style|tone|suggest|suggestions|feedback|"
+        r"improve|edit|change|remove|delete|replace|add another|append|"
+        r"original text|in the document|the document|this document"
+        r")\b",
+        text,
+    ))
+
+
+def _minimal_saved_memory_message(messages: List[Dict]) -> Optional[Dict]:
+    facts: List[str] = []
+    seen = set()
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        metadata = message.get("metadata") if isinstance(message, dict) else None
+        source = str((metadata or {}).get("source") or "")
+        if not source.startswith("saved memory:"):
+            continue
+        content = str(message.get("content") or "")
+        content = re.sub(r"(?m)^\s*Source:\s*saved memory:[^\n]*\n?", "", content)
+        content = content.replace("Core facts about the user:", "")
+        content = re.sub(
+            r"Memory context\. Do not reference unless the user asks about these topics\.\s*",
+            "",
+            content,
+        )
+        for line in content.splitlines():
+            line = line.strip()
+            if not line.startswith("- "):
+                continue
+            fact = line[2:].strip()
+            if not fact or fact in seen:
+                continue
+            seen.add(fact)
+            facts.append(fact)
+            if len(facts) >= 12:
+                break
+        if len(facts) >= 12:
+            break
+    if not facts:
+        return None
+    logger.info("[agent-intent] odysseus doc minimal memory facts=%s", len(facts))
+    return {
+        "role": "user",
+        "content": (
+            "Saved user memory facts from Odysseus Brain. These are the same "
+            "user facts available in the normal prompt path. Use them when "
+            "the user asks for personalization, identity, background, "
+            "preferences, or anything about \"me\" or \"my\":\n"
+            + "\n".join(f"- {fact}" for fact in facts)
+        ),
+    }
+
+
+def _minimal_odysseus_doc_messages(messages: List[Dict], active_document, stream_create: bool = False) -> List[Dict]:
+    """Tiny prompt path for the Odysseus document LoRA.
+
+    This model is trained on document tool behavior, so avoid the normal agent
+    rule stack and send only the task plus the active document when editing.
+    """
+    latest = _extract_last_user_message(messages)
+    if stream_create:
+        system = (
+            "You are Odysseus. Create the requested document by streaming exactly one fenced block:\n"
+            "```document\n"
+            "Title\n"
+            "markdown\n"
+            "Document content\n"
+            "```\n"
+            "Do not use native function-call JSON or <tool_calls> markup. "
+            "Use only the fenced document block above. Do not write anything before the fence. "
+            "Use saved user memory facts when the user asks for something relating to them."
+        )
+    else:
+        system = (
+            "You are Odysseus. Edit or suggest changes to the active document using exactly one fenced tool block when needed.\n"
+            "If the user asks to add, remove, rewrite, transform, change, capitalize, shorten, expand, or otherwise apply a change, use edit_document or update_document, not suggest_document.\n"
+            "Use suggest_document only when the user explicitly asks for suggestions, feedback, or proposed improvements without applying them.\n"
+            "For targeted edits:\n"
+            "```edit_document\n"
+            "<<<FIND>>>\n"
+            "exact text from the active document\n"
+            "<<<REPLACE>>>\n"
+            "replacement text\n"
+            "<<<END>>>\n"
+            "```\n"
+            "For full rewrites only:\n"
+            "```update_document\n"
+            "entire new document content\n"
+            "```\n"
+            "For improvement suggestions:\n"
+            "```suggest_document\n"
+            "<<<FIND>>>\n"
+            "text to improve\n"
+            "<<<SUGGEST>>>\n"
+            "suggested replacement\n"
+            "<<<REASON>>>\n"
+            "why this improves it\n"
+            "<<<END>>>\n"
+            "```\n"
+            "Do not use native function-call JSON or <tool_calls> markup. "
+            "FIND text must be copied exactly from the active document with no labels like content:, title:, or markdown. "
+            "Use only the fenced tool blocks above. Do not write anything before the fenced block. "
+            "After the tool succeeds, Odysseus will answer Done."
+        )
+    out = [{"role": "system", "content": system}]
+    memory_message = _minimal_saved_memory_message(messages)
+    if memory_message:
+        out.append(memory_message)
+    if active_document is not None:
+        content = active_document.current_content or ""
+        out.append({
+            "role": "user",
+            "content": (
+                "Active document:\n"
+                f"Title: {active_document.title}\n"
+                f"Language: {active_document.language or 'text'}\n"
+                "Content:\n"
+                f"{content}"
+            ),
+        })
+    out.append({"role": "user", "content": latest})
+    return out
+
+
+_DOC_MODEL_ARTIFACT_RE = re.compile(
+    r"(?:\|end\|)+\|?assistan(?:t)?\|?"
+    r"|\|assistan(?:t)?\|"
+    r"|<\|im_start\|>\s*assistant"
+    r"|<\|im_end\|>",
+    re.IGNORECASE,
+)
+
+
+def _strip_doc_model_artifacts(text: str) -> str:
+    return _DOC_MODEL_ARTIFACT_RE.sub("", text or "")
+
+
+def _normalize_stream_document_fences(text: str, target_tool: str = "create_document") -> str:
+    """Treat visible ```document/documen blocks as document tool blocks.
+
+    The document LoRA occasionally emits a neutral/truncated `documen` fence.
+    For new documents that maps to create_document. For active-document turns,
+    the same shape is a full replacement of the open document, so map it to
+    update_document and drop the title/language header lines.
+    """
+    text = _strip_doc_model_artifacts(text or "")
+
+    def repl(match: re.Match) -> str:
+        body = match.group(1) or ""
+        if target_tool == "update_document":
+            lines = body.splitlines()
+            if lines and not lines[0].lstrip().startswith("#"):
+                lines = lines[1:]
+            if lines and lines[0].strip().lower() in {
+                "markdown", "md", "text", "txt", "html", "email",
+                "python", "javascript", "typescript", "json", "yaml",
+            }:
+                lines = lines[1:]
+            while lines and not lines[0].strip():
+                lines = lines[1:]
+            body = "\n".join(lines)
+        return f"```{target_tool}\n{body}"
+
+    return re.sub(
+        r"```documen(?:t)?\s*\n([\s\S]*?)(?=\n```|$)",
+        repl,
+        text,
+        flags=re.IGNORECASE,
+    )
 def _recent_context_for_retrieval(messages: List[Dict], max_user: int = 3, max_chars: int = 600) -> str:
     """Build the tool-retrieval query from the last few USER turns, not just
     the latest one.
@@ -1065,9 +1334,18 @@ def _build_system_prompt(
     # the trusted system role. Bound up front so the insert block below can
     # always check it.
     _skills_message = None
+    _email_style_message = None
+    _integ_message = None
+    _mcp_desc_message = None
     if active_document:
         set_active_document(active_document.id)
         _doc_raw = active_document.current_content or ""
+        _document_writing_style = ""
+        try:
+            from src.settings import load_settings as _load_settings
+            _document_writing_style = (_load_settings().get("document_writing_style", "") or "").strip()
+        except Exception:
+            _document_writing_style = ""
         _doc_title_l = (active_document.title or "").strip().lower()
         _is_email_doc = (
             active_document.language == "email"
@@ -1158,6 +1436,21 @@ def _build_system_prompt(
                     f'text must match the document EXACTLY and must NOT include the leading line-number '
                     f'or tab (those are reference-only). To rewrite entirely: update_document.'
                 )
+                if _document_writing_style:
+                    doc_ctx += (
+                        "\n\nDOCUMENT WRITING STYLE — use only for normal prose writing/revision in this "
+                        "document, not for code/data/JSON and not for email-specific greetings or signatures:\n"
+                        f"{_document_writing_style}"
+                    )
+                else:
+                    doc_ctx += (
+                        "\n\nStyle safety: if the user asks to write/rewrite this document \"in my style\" "
+                        "or \"as my style\", do NOT infer that style from memories, identity, public persona, "
+                        "creator/channel references, or biographical facts. There is no saved document writing "
+                        "style. Ask the user for a style sample or a document writing style description before "
+                        "rewriting for style. You may still make ordinary requested edits that do not depend on "
+                        "knowing the user's personal style."
+                    )
         _doc_message = untrusted_context_message("active editor document", doc_ctx)
         _doc_message["_protected"] = True
 
@@ -1273,9 +1566,9 @@ def _build_system_prompt(
             from src.settings import load_settings as _load_settings
             _style = (_load_settings().get("email_writing_style", "") or "").strip()
             if _style:
+                # Hardcoded identity/style rules stay in the trusted system prompt.
                 agent_prompt += (
-                    "\n\n📧 EMAIL WRITING STYLE AND IDENTITY — FOLLOW FOR ANY EMAIL DRAFT OR SEND:\n"
-                    f"{_style}\n\n"
+                    "\n\n"
                     "Hard identity rule: write as the user/mailbox owner only. Do not sign as, speak as, "
                     "or imply you are the recipient, original sender, quoted sender, spouse, assistant, "
                     "company, or any other third party. If a signature is needed, use only the name/signature "
@@ -1283,6 +1576,12 @@ def _build_system_prompt(
                     "Mechanical style rules: never use em dash/en dash; use --. Never use curly apostrophes. "
                     "For English emails, default to Hi [Name] or Hiya from the saved style rather than Hey. "
                     "If the saved style specifies Best/newline/name, use that sign-off when a sign-off is natural."
+                )
+                # User-editable style text is untrusted — wrap it so a malicious
+                # style value cannot inject system-role instructions.
+                _email_style_message = untrusted_context_message(
+                    "email writing style",
+                    "EMAIL WRITING STYLE AND IDENTITY — FOLLOW FOR ANY EMAIL DRAFT OR SEND:\n" + _style,
                 )
         except Exception:
             pass
@@ -1411,6 +1710,25 @@ def _build_system_prompt(
         except Exception as _sk_err:
             logger.debug(f"skill injection failed (non-fatal): {_sk_err}")
 
+    # Integration descriptions — user-editable fields, must not be in system role.
+    if not suppress_local_context:
+        try:
+            from src.integrations import get_integrations_prompt
+            _integ_prompt = get_integrations_prompt()
+            if _integ_prompt:
+                _integ_message = untrusted_context_message("integrations", _integ_prompt)
+        except Exception as _integ_err:
+            logger.debug(f"Integration prompt injection skipped: {_integ_err}")
+
+    # MCP tool descriptions — sourced from external servers, must not be in system role.
+    if mcp_mgr:
+        try:
+            _mcp_desc = mcp_mgr.get_tool_descriptions_for_prompt(mcp_disabled_map or {})
+            if _mcp_desc:
+                _mcp_desc_message = untrusted_context_message("MCP tools", _mcp_desc)
+        except Exception as _mcp_err:
+            logger.debug(f"MCP description injection skipped: {_mcp_err}")
+
     agent_msg = {"role": "system", "content": agent_prompt}
     insert_idx = 0
     for i, msg in enumerate(messages):
@@ -1449,6 +1767,15 @@ def _build_system_prompt(
         last_user_idx += 1  # the document message is now at last_user_idx
     if _email_message:
         merged.insert(last_user_idx, _email_message)
+        last_user_idx += 1
+    if _email_style_message:
+        merged.insert(last_user_idx, _email_style_message)
+        last_user_idx += 1
+    if _integ_message:
+        merged.insert(last_user_idx, _integ_message)
+        last_user_idx += 1
+    if _mcp_desc_message:
+        merged.insert(last_user_idx, _mcp_desc_message)
         last_user_idx += 1
     if _skills_message:
         merged.insert(last_user_idx, _skills_message)
@@ -1556,19 +1883,6 @@ def _build_base_prompt(
             # Skill index is a soft enhancement — never fail prompt assembly on it.
             logger.debug(f"Skill-index injection skipped: {_e}")
 
-    # Inject integration descriptions
-    if not suppress_local_context:
-        from src.integrations import get_integrations_prompt
-        integ_prompt = get_integrations_prompt()
-        if integ_prompt:
-            agent_prompt += "\n\n" + integ_prompt
-
-    # Inject MCP tool descriptions
-    if mcp_mgr:
-        mcp_desc = mcp_mgr.get_tool_descriptions_for_prompt(mcp_disabled_map or {})
-        if mcp_desc:
-            agent_prompt += mcp_desc
-
     return agent_prompt, skill_index_block
 
 
@@ -1576,6 +1890,7 @@ def _build_base_prompt(
 def _resolve_tool_blocks(round_response: str, native_tool_calls: list, round_num: int, is_api_model: bool = False):
     """Choose native function calls or fenced code block parsing. Returns (tool_blocks, used_native)."""
     used_native = False
+    converted_calls = []  # native calls that converted, ALIGNED with tool_blocks
     if native_tool_calls:
         tool_blocks = []
         for tc in native_tool_calls:
@@ -1584,6 +1899,7 @@ def _resolve_tool_blocks(round_response: str, native_tool_calls: list, round_num
             block = function_call_to_tool_block(tc_name, tc_args)
             if block:
                 tool_blocks.append(block)
+                converted_calls.append(tc)
                 logger.info(f"  -> converted: {tc_name} -> {block.tool_type}")
             else:
                 logger.warning(f"  -> FAILED to convert native call: {tc_name} args={tc_args[:200]}")
@@ -1613,7 +1929,7 @@ def _resolve_tool_blocks(round_response: str, native_tool_calls: list, round_num
                 f"{len(native_tool_calls)} native calls, "
                 f"{len(tool_blocks)} tool blocks. Preview: {resp_preview}")
 
-    return tool_blocks, used_native
+    return tool_blocks, used_native, converted_calls
 
 
 def _append_tool_results(
@@ -1837,7 +2153,7 @@ async def _run_verifier_subagent(
     except Exception as e:
         logger.warning(f"[agent] verifier subagent failed: {e}")
         return []
-    raw = re.sub(r"<think>.*?</think>", "", raw or "", flags=re.DOTALL | re.IGNORECASE)
+    raw = _strip_think_blocks(raw or "")
     last_v = None
     for line in raw.splitlines():
         if "VERIFICATION:" in line:
@@ -1954,6 +2270,7 @@ async def stream_agent_loop(
     tool_policy: Optional[ToolPolicy] = None,
     workspace: Optional[str] = None,
     forced_tools: Optional[Set[str]] = None,
+    uploaded_files: Optional[list] = None,
     _is_teacher_run: bool = False,
 ) -> AsyncGenerator[str, None]:
     """Streaming agent loop generator.
@@ -2150,11 +2467,17 @@ async def stream_agent_loop(
                         )
                         logger.info(f"[tool-rag] Retrieved tools for query: {sorted(_relevant_tools - ALWAYS_AVAILABLE)}")
                     except asyncio.TimeoutError:
+                        # Leave _relevant_tools unset so the keyword fallback
+                        # below still runs. Hard-coding ALWAYS_AVAILABLE here
+                        # skipped the deterministic keyword hints whenever the
+                        # embedding backend was slow (e.g. a remote endpoint
+                        # cold-loading its model), silently stripping email/
+                        # calendar tools from queries that named them outright.
                         logger.warning(
-                            "[tool-rag] Retrieval exceeded %.1fs; falling back to always-available tools",
+                            "[tool-rag] Retrieval exceeded %.1fs; falling back to keyword tool selection",
                             _TOOL_SELECTION_TIMEOUT_SECONDS,
                         )
-                        _relevant_tools = set(ALWAYS_AVAILABLE)
+                        _relevant_tools = None
         except Exception as e:
             logger.warning(f"[tool-rag] Retrieval failed, using keyword fallback: {e}")
             _relevant_tools = None
@@ -2190,7 +2513,13 @@ async def stream_agent_loop(
         if "email" in (_intent.get("domains") or set()):
             _relevant_tools.add("ui_control")
         if "web" in (_intent.get("domains") or set()):
-            _relevant_tools.update({"web_search", "web_fetch"})
+            _relevant_tools.update(WEB_TOOL_NAMES)
+            _blocked_web_tools = sorted(WEB_TOOL_NAMES & disabled_tools)
+            if _blocked_web_tools:
+                logger.info(
+                    "[agent-intent] web domain selected but search tools remain disabled=%s",
+                    _blocked_web_tools,
+                )
         if "ui" in (_intent.get("domains") or set()):
             _relevant_tools.add("ui_control")
 
@@ -2200,9 +2529,18 @@ async def stream_agent_loop(
     if _relevant_tools is not None and active_document is not None:
         _relevant_tools.update({"edit_document", "update_document", "suggest_document"})
 
-    # Per-request UI toggles are stronger than retrieval. If the user turns on
-    # Search, the model must see the search tools even when the latest text is a
-    # typo or otherwise low-signal for tool RAG.
+    # Current-turn chat uploads are real files under the upload/data root. Make
+    # the read-side file/document tools visible immediately so the agent can
+    # inspect files whose inline text was truncated or omitted.
+    if not guide_only and uploaded_files:
+        if _relevant_tools is None:
+            from src.tool_index import ALWAYS_AVAILABLE
+            _relevant_tools = set(ALWAYS_AVAILABLE)
+        _relevant_tools.update({"read_file", "grep", "ls", "manage_documents"})
+
+    # Per-request forced tools are stronger than retrieval. Explicit search
+    # settings make web tools visible even when tool RAG misses them;
+    # route-level disabled_tools decides what remains allowed.
     if not guide_only and forced_tools:
         if _relevant_tools is None:
             from src.tool_index import ALWAYS_AVAILABLE
@@ -2247,6 +2585,54 @@ async def stream_agent_loop(
         except Exception as _e:
             logger.debug(f"[tool-rag] skill-aware tool include skipped: {_e}")
 
+    _intent_domains = set(_intent.get("domains") or set())
+    _ody_doc_finetune_mode = (
+        (model or "").lower().startswith("odysseus-qwen3")
+        and (
+            "documents" in _intent_domains
+            or _turn_targets_active_document(_intent, _last_user, active_document)
+            or _prompt_active_document is not None
+        )
+        and "files" not in _intent_domains
+        and not guide_only
+    )
+    _ody_doc_stream_create_mode = _ody_doc_finetune_mode and _prompt_active_document is None
+    if _ody_doc_finetune_mode and _relevant_tools is not None:
+        if _prompt_active_document is not None:
+            _relevant_tools = {
+                "edit_document", "update_document", "suggest_document",
+                "ask_user", "update_plan",
+            }
+        else:
+            _relevant_tools = {"create_document", "ask_user", "update_plan"}
+        logger.info("[agent-intent] odysseus doc finetune tool clamp=%s", sorted(_relevant_tools))
+
+    if (
+        _relevant_tools is not None
+        and _turn_targets_active_document(_intent, _last_user, active_document)
+        and "files" not in _intent_domains
+        and not uploaded_files
+        and not workspace
+    ):
+        _doc_irrelevant_file_tools = {
+            "append_file",
+            "bash",
+            "edit_file",
+            "glob",
+            "grep",
+            "ls",
+            "read_file",
+            "replace_file",
+            "run_shell",
+            "write_file",
+        }
+        _removed_doc_file_tools = sorted(_relevant_tools & _doc_irrelevant_file_tools)
+        if _removed_doc_file_tools:
+            _relevant_tools.difference_update(_doc_irrelevant_file_tools)
+            logger.info(
+                "[agent-intent] active document turn removed file tools=%s",
+                _removed_doc_file_tools,
+            )
     if _relevant_tools is not None:
         logger.info("[agent-intent] selected_tools=%s", sorted(_relevant_tools)[:50])
 
@@ -2459,7 +2845,6 @@ async def stream_agent_loop(
     # backstop. Counting identical repeats — not distinct same-tool calls —
     # lets a legit batch (e.g. 18 calendar events at once) through.
     _call_freq: collections.Counter = collections.Counter()
-    _THINK_RE = re.compile(r'<think>.*?</think>', re.DOTALL | re.IGNORECASE)
     _force_answer = False  # set by loop-breaker → next round runs with NO tools
     # Supervisor: how many times we've nudged the model after it announced
     # an action without emitting the tool call. Capped to prevent a model
@@ -2782,7 +3167,7 @@ async def stream_agent_loop(
             _round_first_event_logged,
             _round_first_token_logged,
         )
-        tool_blocks, used_native = _resolve_tool_blocks(
+        tool_blocks, used_native, converted_calls = _resolve_tool_blocks(
             round_response,
             native_tool_calls,
             round_num,
@@ -2797,7 +3182,7 @@ async def stream_agent_loop(
             if tool_blocks:
                 logger.info(f"[agent] force-answer round {round_num}: discarding {len(tool_blocks)} ignored tool call(s)")
             tool_blocks = []
-            if not _THINK_RE.sub("", strip_tool_blocks(round_response)).strip():
+            if not _strip_think_blocks(strip_tool_blocks(round_response)).strip():
                 # The model burned its budget gathering data but never wrote a
                 # final answer (common with weaker models on multi-source
                 # briefings). Salvage it: one blunt non-streaming synthesis call
@@ -2820,7 +3205,7 @@ async def stream_agent_loop(
                         url=endpoint_url, model=model, messages=_synth_messages,
                         headers=headers, temperature=0.3, max_tokens=max_tokens, timeout=60,
                     )
-                    _synth = _THINK_RE.sub("", strip_tool_blocks(_raw or "")).strip()
+                    _synth = _strip_think_blocks(strip_tool_blocks(_raw or "")).strip()
                 except Exception as _e:
                     logger.warning(f"[agent] grace synthesis failed: {_e}")
                 if _synth:
@@ -2882,7 +3267,7 @@ async def stream_agent_loop(
             # the model fix them (capped, and it must do new effectful work
             # to re-trigger). Skipped on force-answer rounds (no tools to
             # fix with), pure Q&A, and when the toggle is off.
-            _claimed_done = bool(_THINK_RE.sub("", cleaned_round).strip())
+            _claimed_done = bool(_strip_think_blocks(cleaned_round).strip())
             if (_effectful_used and not _force_answer
                     and _claimed_done
                     and _verifier_rounds < _VERIFIER_MAX_ROUNDS
@@ -2926,7 +3311,7 @@ async def stream_agent_loop(
             # actual tool now") and loop again. Capped at
             # _MAX_INTENT_NUDGES so a model that genuinely cannot use the
             # tool doesn't pin us in a forever loop.
-            _intent_text = _THINK_RE.sub("", cleaned_round).strip()
+            _intent_text = _strip_think_blocks(cleaned_round).strip()
             _intent_match = _INTENT_RE.search(_intent_text) if _intent_text else None
             # Only nudge when the round REALLY looks like an unfinished
             # promise: short response (<400 chars), no fenced code/answer,
@@ -2989,7 +3374,7 @@ async def stream_agent_loop(
         # "Real" answer text = round text minus <think> blocks. Empty-think
         # rounds (just "<think>\n\n</think>" + a tool call) must not read as
         # progress, so strip think before checking.
-        _real_text = _THINK_RE.sub("", cleaned_round).strip()
+        _real_text = _strip_think_blocks(cleaned_round).strip()
         # Circling = repeating a recent call with nothing written. Any
         # progress (a NEW distinct call, or actual answer text) resets it.
         if _is_repeat and not _real_text:
@@ -3215,9 +3600,12 @@ async def stream_agent_loop(
                     f'data: {json.dumps({"type": "ui_control", "data": result})}\n\n'
                 )
 
-            # ask_user: the agent posed a multiple-choice question. Emit it so the
-            # frontend renders clickable options, then end the turn (below) and
-            # wait — the user's pick becomes the next message.
+            # ask_user: remember the payload now, but emit the interactive event
+            # only *after* tool_output below.  Emitting it before tool_output let
+            # the subsequent tool-card rewrite/scroll push the choices out of
+            # view.  The payload is also copied into the persisted tool event so
+            # history reload can reconstruct an unanswered card.
+            _pending_ask_user_event = None
             if "ask_user" in result:
                 # The question lives in the tool args. ChatMessage.to_dict()
                 # replays only role+content to the model next turn — tool_event
@@ -3232,9 +3620,7 @@ async def stream_agent_loop(
                     _auq_delta = ("\n\n" if full_response.strip() else "") + _auq_q
                     full_response += _auq_delta
                     yield 'data: ' + json.dumps({"delta": _auq_delta}) + '\n\n'
-                yield (
-                    f'data: {json.dumps({"type": "ask_user", "data": result["ask_user"]})}\n\n'
-                )
+                _pending_ask_user_event = _auq
                 _awaiting_user = True
 
             # update_plan: agent wrote back to the plan (ticked a step / revised).
@@ -3289,6 +3675,10 @@ async def stream_agent_loop(
 
             # Emit tool_output (include ui_event data if present)
             tool_output_data = {"type": "tool_output", "tool": block.tool_type, "command": cmd_display, "output": output_text, "exit_code": result.get("exit_code")}
+            if _pending_ask_user_event:
+                # Keep enough state in the streamed tool result for alternate
+                # clients to render the prompt without depending on event order.
+                tool_output_data["ask_user"] = _pending_ask_user_event
             if "ui_event" in result:
                 tool_output_data["ui_event"] = result["ui_event"]
                 for k in (
@@ -3318,6 +3708,14 @@ async def stream_agent_loop(
             if "diff" in result:
                 tool_output_data["diff"] = result["diff"]
             yield f'data: {json.dumps(tool_output_data)}\n\n'
+
+            # This must be the final UI event for ask_user: the frontend appends
+            # the card below the now-settled tool node and cancels any between-
+            # round spinner.  The turn ends after the current tool batch.
+            if _pending_ask_user_event:
+                yield (
+                    f'data: {json.dumps({"type": "ask_user", "data": _pending_ask_user_event})}\n\n'
+                )
 
             # Native document tools open in the editor + carry the REAL doc id.
             # Emit a doc_update so the frontend opens/activates it and sends it
@@ -3376,6 +3774,11 @@ async def stream_agent_loop(
             # this the diff shows live but vanishes from saved history.
             if result.get("diff"):
                 tool_event["diff"] = result["diff"]
+            if _pending_ask_user_event:
+                # Persist the structured question with the tool event.  On a
+                # reload, chatRenderer can restore the card; a later user
+                # message removes it as answered.
+                tool_event["ask_user"] = _pending_ask_user_event
             tool_events.append(tool_event)
             if block.tool_type in _VERIFIER_EFFECTFUL_TOOLS:
                 _effectful_used = True
@@ -3396,7 +3799,12 @@ async def stream_agent_loop(
             break
 
         # Feed results back to LLM for next round
-        _append_tool_results(messages, round_response, native_tool_calls,
+        # Pass the CONVERTED calls (aligned 1:1 with tool_result_texts), not the
+        # raw native_tool_calls: a call that failed to convert is dropped from
+        # tool_blocks but stayed in native_tool_calls, so indexing results by
+        # native position mis-attached each result to the wrong tool_call_id
+        # (and left the real call answered empty).
+        _append_tool_results(messages, round_response, converted_calls,
                              tool_results, tool_result_texts, used_native, round_num,
                              round_reasoning=round_reasoning)
 

@@ -32,6 +32,7 @@
  *
  * @returns {(endpoint: string, extraPayload: object, layerName: string, btn: HTMLButtonElement, opts?: { busyLabel?: string }) => Promise<void>}
  */
+import { t } from '../i18n.js';
 import { state } from './state.js';
 
 const KNOWN_DEPS = ['realesrgan', 'rembg'];
@@ -101,9 +102,9 @@ export function createApplyImageTool({
         state.activeLayerId = layer.id;
         composite();
         renderLayerPanel();
-        if (uiModule) uiModule.showToast(layerName + ' complete', 4500);
+        if (uiModule) uiModule.showToast(t('editor.ai_tool_complete', { name: layerName }), 4500);
       };
-      img.onerror = () => { if (uiModule) uiModule.showToast('Failed to load result', 6000); };
+      img.onerror = () => { if (uiModule) uiModule.showToast(t('editor.failed_to_load_result'), 6000); };
       img.src = 'data:image/png;base64,' + data.image;
     } catch (e) {
       // Detect known failure modes and surface an action-toast.
@@ -121,19 +122,19 @@ export function createApplyImageTool({
       }
       if (uiModule) {
         if (depMatch && uiModule.showToast.length >= 2) {
-          uiModule.showToast(layerName + ' failed: ' + depMatch + ' is not installed on the server.', {
+          uiModule.showToast(t('editor.dep_not_installed', { name: layerName, dep: depMatch }), {
             duration: 9000,
-            action: `Install ${depMatch}`,
+            action: t('editor.install_dep', { dep: depMatch }),
             onAction: () => openCookbookForDependency(depMatch),
           });
         } else if (needsImg2Img && uiModule.showToast.length >= 2) {
-          uiModule.showToast(layerName + ' failed: ' + e.message, {
+          uiModule.showToast(t('editor.ai_tool_needs_img2img', { name: layerName, message: e.message }), {
             duration: 9000,
-            action: 'Open Cookbook',
+            action: t('editor.open_cookbook'),
             onAction: () => openCookbookForImg2img(),
           });
         } else {
-          uiModule.showToast(layerName + ' failed: ' + e.message, 6000);
+          uiModule.showToast(t('editor.ai_tool_failed', { name: layerName, message: e.message }), 6000);
         }
       }
     } finally {

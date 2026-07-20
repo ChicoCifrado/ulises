@@ -1,0 +1,9 @@
+{
+  "youtube": {
+    "api_unavailable": "YouTube transcript API not available",
+    "failed_after_retries": "Failed after {{count}} attempts",
+    "yt_dlp_failed": "yt-dlp failed: {{error}}",
+    "comment_fetch_timed_out": "Comment fetch timed out",
+    "yt_dlp_not_installed": "yt-dlp not installed"
+  }
+}

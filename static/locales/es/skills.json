@@ -1,0 +1,11 @@
+{
+  "skills": {
+    "generic_skill": "El skill está etiquetado como genérico",
+    "audit_flagged": "La auditoría marcó el skill como genérico o innecesario",
+    "skipped": "omitido",
+    "running": "ejecutando",
+    "done": "completado",
+    "no_skills_to_audit": "No hay skills para auditar.",
+    "tidy_reason": "Nada que limpiar"
+  }
+}

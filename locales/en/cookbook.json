@@ -1,0 +1,41 @@
+{
+  "cookbook": {
+    "diffusers_no_torch": "Diffusion serving requires PyTorch and diffusers.",
+    "model_gated": "Model access is gated or unauthorized.",
+    "traceback_detected": "Python traceback detected during serve startup.",
+    "ssh_key_failed": "Failed to generate SSH key",
+    "setup_timed_out": "Setup timed out (120s)",
+    "no_gpu_probe": "No GPU memory probe available",
+    "pid_not_running": "PID {pid} is not running",
+    "kill_returned": "kill returned {code}",
+    "kill_timed_out": "kill command timed out",
+    "hf_api_error": "HF API HTTP {code}",
+    "hf_api_failed": "HF API request failed",
+    "repo_format": "repo must be <org>/<model>",
+    "http_status": "HTTP {status}",
+    "yaml_parse_failed": "yaml parse: {error}",
+    "diagnosis": {
+      "no_gpu_memory": "Not enough free GPU memory to load the model.",
+      "gpu_oom": "GPU out of memory during model loading.",
+      "tp_incompatible": "Tensor parallelism config is incompatible with the model.",
+      "context_too_large": "Context window is too large for available GPU memory.",
+      "auto_tool_choice": "Model does not support auto tool choice.",
+      "custom_code_needed": "Model requires --trust-remote-code flag.",
+      "modelopt_quant": "ModelOpt LM-head quantization detected. Use the vLLM convert script.",
+      "kernel_mismatch": "CUDA kernel mismatch — try rebuilding or updating the kernel package.",
+      "port_in_use": "Port is already in use by another process.",
+      "no_gpus_visible": "No GPUs visible to the container or process.",
+      "unsupported_gpu": "GPU architecture is not supported by this build.",
+      "vllm_not_installed": "vLLM is not installed. Install it with pip install vllm.",
+      "sglang_deps_missing": "SGLang native dependencies missing. Install libnuma-dev, python3-dev, and sglang-kernel.",
+      "sglang_not_installed": "SGLang is not installed.",
+      "cmake_missing": "CMake is required but not found on PATH.",
+      "compiler_missing": "C/C++ compiler (gcc/clang) is required but not found.",
+      "git_missing": "Git is required but not found on PATH.",
+      "llamacpp_deps_missing": "llama.cpp dependencies missing.",
+      "no_gguf_found": "No GGUF model found matching the requested name or path.",
+      "diffusion_deps_missing": "Diffusion serving dependencies missing.",
+      "model_access_denied": "Access to the requested model is denied or the model does not exist."
+    }
+  }
+}

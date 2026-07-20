@@ -43,6 +43,7 @@ from core.platform_compat import (
     find_bash,
     git_bash_path,
 )
+from core.translations import t
 
 
 def _require_admin(request: Request):
@@ -59,15 +60,15 @@ def _require_admin(request: Request):
     if user == INTERNAL_TOOL_USER:
         return
     if not user or user == "api":
-        raise HTTPException(403, "Admin only")
+        raise HTTPException(403, t("shell.admin_only"))
     if not auth_manager.is_admin(user):
-        raise HTTPException(403, "Admin only")
+        raise HTTPException(403, t("shell.admin_only"))
 
 
 def _reject_cross_site(request: Request):
     """Reject browser cross-site navigations to shell-touching endpoints."""
     if request.headers.get("sec-fetch-site") == "cross-site":
-        raise HTTPException(403, "Cross-site request rejected")
+        raise HTTPException(403, t("shell.cross_site_rejected"))
 
 
 _SSH_PORT_RE = re.compile(r"^\d{1,5}$")
@@ -103,13 +104,7 @@ logger = logging.getLogger(__name__)
 PTY_SUPPORTED = pty is not None and fcntl is not None and hasattr(os, "setsid")
 
 
-DOCKER_IN_CONTAINER_HINT = (
-    "Not available inside the Ulises container by design. The image ships no "
-    "docker CLI and no host socket is mounted. Run Docker-backed launches on a "
-    "remote server, where docker is checked over SSH. Mounting /var/run/docker.sock "
-    "into the container would grant it host-root access, so only do that if you "
-    "accept that risk."
-)
+DOCKER_IN_CONTAINER_HINT = t("shell.docker_in_container_hint")
 
 
 def _running_in_container(dockerenv_path="/.dockerenv", cgroup_path="/proc/1/cgroup"):
@@ -201,8 +196,8 @@ def _package_status_note(name: str, probe: dict) -> str:
             return "; ".join(parts)
         if module.get("found") and not dists.get("vllm"):
             loc = locations[0] if locations else module.get("origin") or "unknown path"
-            return f"Python sees a vllm namespace at {loc}, but no vLLM CLI is on PATH."
-        return "vLLM CLI not found on PATH."
+            return t("shell.vllm_not_found").format(loc=loc)
+        return t("shell.vllm_not_found")
     if name == "llama_cpp":
         parts = []
         if binaries.get("llama-server"):
@@ -214,12 +209,12 @@ def _package_status_note(name: str, probe: dict) -> str:
         return (
             "; ".join(parts)
             if parts
-            else "No native llama-server or llama-cpp-python server package found."
+            else t("shell.no_installable")
         )
     if name == "diffusers":
         if _package_installed_from_probe(name, probe):
             return f"diffusers {dists.get('diffusers', 'available')} with torch {dists.get('torch', 'available')}"
-        return "Diffusers serving needs both diffusers and torch."
+        return t("shell.diffusers_needs_torch")
     if name in dists:
         return f"{name} {dists[name]}"
     return ""
@@ -243,7 +238,7 @@ def _package_pip_update_status(
 
     if pkg.get("kind") == "system" or not pkg.get("pip"):
         return PackageUpdateStatus(
-            False, "Update this system dependency outside Ulises."
+            False, t("shell.no_installable")
         )
 
     name = pkg.get("name")
@@ -261,16 +256,16 @@ def _package_pip_update_status(
     if name == "llama_cpp" and binaries.get("llama-server"):
         return PackageUpdateStatus(
             False,
-            "Using native llama-server on PATH; update it with its package manager or source checkout.",
+            t("shell.update_native_llama_server"),
         )
     if name == "vllm" and binaries.get("vllm") and not dists.get("vllm"):
         return PackageUpdateStatus(
             False,
-            "Using a vLLM CLI on PATH without Python package metadata; update it outside Ulises.",
+            t("shell.update_native_vllm"),
         )
 
     return PackageUpdateStatus(
-        True, "Update uses pip in the selected Python environment."
+        True, t("shell.update_via_pip")
     )
 
 
@@ -454,7 +449,7 @@ async def _exec_shell(command: str, timeout: int = EXEC_TIMEOUT) -> Dict[str, An
                 pass
         return {
             "stdout": "",
-            "stderr": f"Command timed out after {timeout}s",
+            "stderr": t("shell.timed_out").format(timeout=timeout),
             "exit_code": -1,
         }
     except Exception as e:
@@ -464,7 +459,7 @@ async def _exec_shell(command: str, timeout: int = EXEC_TIMEOUT) -> Dict[str, An
 async def _generate_pty(cmd: str, timeout: int, request: Request):
     """Run command in a pseudo-TTY so tqdm/progress bars work natively."""
     if not PTY_SUPPORTED:
-        msg = "PTY streaming is not supported on this platform"
+        msg = t("shell.pty_not_supported")
         if _PTY_IMPORT_ERROR:
             msg += f": {_PTY_IMPORT_ERROR}"
         yield f"data: {json.dumps({'stream': 'stderr', 'data': msg, 'error': PTY_UNSUPPORTED_ERROR})}\n\n"
@@ -503,7 +498,7 @@ async def _generate_pty(cmd: str, timeout: int, request: Request):
             if deadline and loop.time() > deadline:
                 proc.kill()
                 await proc.wait()
-                yield f"data: {json.dumps({'stream': 'stderr', 'data': f'Command timed out after {timeout}s'})}\n\n"
+                yield f"data: {json.dumps({'stream': 'stderr', 'data': t('shell.timed_out').format(timeout=timeout)})}\n\n"
                 yield f"data: {json.dumps({'exit_code': -1})}\n\n"
                 return
 
@@ -642,11 +637,11 @@ async def _generate_tmux(cmd: str, request: Request):
     await proc.wait()
     if proc.returncode != 0:
         stderr = (await proc.stderr.read()).decode(errors="replace")
-        yield f"data: {json.dumps({'stream': 'stderr', 'data': f'Failed to start tmux: {stderr}'})}\n\n"
+        yield f"data: {json.dumps({'stream': 'stderr', 'data': t('shell.tmux_failed').format(error=stderr)})}\n\n"
         yield f"data: {json.dumps({'exit_code': -1})}\n\n"
         return
 
-    yield f"data: {json.dumps({'stream': 'stdout', 'data': f'Started tmux session: {session_id}'})}\n\n"
+    yield f"data: {json.dumps({'stream': 'stdout', 'data': t('shell.tmux_started').format(session_id=session_id)})}\n\n"
 
     # Tail the log file, streaming new lines as SSE
     lines_sent = 0
@@ -656,7 +651,7 @@ async def _generate_tmux(cmd: str, request: Request):
         # Check client disconnect
         if await request.is_disconnected():
             # tmux keeps running — that's the whole point
-            yield f"data: {json.dumps({'stream': 'stdout', 'data': f'Disconnected. tmux session {session_id} continues in background.'})}\n\n"
+            yield f"data: {json.dumps({'stream': 'stdout', 'data': t('shell.tmux_disconnected').format(session_id=session_id)})}\n\n"
             return
 
         # Read new lines from log
@@ -761,17 +756,17 @@ async def _generate_win_detached(cmd: str, request: Request):
             **detached_popen_kwargs(),
         )
     except Exception as e:
-        yield f"data: {json.dumps({'stream': 'stderr', 'data': f'Failed to launch background job: {e}'})}\n\n"
+        yield f"data: {json.dumps({'stream': 'stderr', 'data': t('shell.bg_job_failed').format(error=e)})}\n\n"
         yield f"data: {json.dumps({'exit_code': -1})}\n\n"
         return
 
-    yield f"data: {json.dumps({'stream': 'stdout', 'data': f'Started background job: {session_id}'})}\n\n"
+    yield f"data: {json.dumps({'stream': 'stdout', 'data': t('shell.bg_job_started').format(session_id=session_id)})}\n\n"
 
     lines_sent = 0
     exit_code = None
     while True:
         if await request.is_disconnected():
-            yield f"data: {json.dumps({'stream': 'stdout', 'data': f'Disconnected. Background job {session_id} continues running.'})}\n\n"
+            yield f"data: {json.dumps({'stream': 'stdout', 'data': t('shell.bg_job_disconnected').format(session_id=session_id)})}\n\n"
             return
         try:
             if log_path.exists():
@@ -823,7 +818,7 @@ def setup_shell_routes() -> APIRouter:
         _require_admin(request)
         cmd = req.command.strip()
         if not cmd:
-            return {"stdout": "", "stderr": "No command provided", "exit_code": 1}
+            return {"stdout": "", "stderr": t("shell.no_command"), "exit_code": 1}
 
         logger.info("User shell exec requested: length=%d", len(cmd))
         result = await _exec_shell(
@@ -839,7 +834,7 @@ def setup_shell_routes() -> APIRouter:
         if not cmd:
 
             async def empty():
-                yield f"data: {json.dumps({'stream': 'stderr', 'data': 'No command provided'})}\n\n"
+                yield f"data: {json.dumps({'stream': 'stderr', 'data': t('shell.no_command')})}\n\n"
                 yield f"data: {json.dumps({'exit_code': 1})}\n\n"
 
             return StreamingResponse(empty(), media_type="text/event-stream")
@@ -954,7 +949,7 @@ def setup_shell_routes() -> APIRouter:
                         await proc.wait()
                     except ProcessLookupError:
                         pass
-                yield f"data: {json.dumps({'stream': 'stderr', 'data': f'Command timed out after {timeout}s'})}\n\n"
+                yield f"data: {json.dumps({'stream': 'stderr', 'data': t('shell.timed_out').format(timeout=timeout)})}\n\n"
                 yield f"data: {json.dumps({'exit_code': -1})}\n\n"
             except Exception as e:
                 yield f"data: {json.dumps({'stream': 'stderr', 'data': str(e)})}\n\n"
@@ -1063,33 +1058,44 @@ def setup_shell_routes() -> APIRouter:
         importlib.invalidate_caches()
         try:
             user_site = site.getusersitepackages()
-            if user_site and os.path.isdir(user_site) and user_site not in sys.path:
-                sys.path.append(user_site)
+            if user_site and os.path.isdir(user_site):
+                # Use addsitedir(), NOT a bare sys.path.append(). When a package
+                # is `pip install --user`'d at runtime (Cookbook → Install) the
+                # long-lived server process started before the user-site existed,
+                # so site never processed it — including its `.pth` hooks. On
+                # Python 3.12+ `distutils` is gone from stdlib and is only
+                # restored by setuptools' `distutils-precedence.pth`, which ships
+                # in user-site. basicsr (a realesrgan dep) does `import distutils`
+                # at import time, so a plain append left the package importable
+                # but `import distutils` failing → realesrgan probed as
+                # not-installed until a full process restart. addsitedir() replays
+                # the `.pth` files so the shim is active.
+                site.addsitedir(user_site)
         except Exception:
             pass
         if ssh_port and str(ssh_port).strip() not in ("", "22"):
             _port = str(ssh_port).strip()
             if not _SSH_PORT_RE.match(_port) or not (1 <= int(_port) <= 65535):
-                raise HTTPException(400, "Invalid ssh_port")
+                raise HTTPException(400, t("shell.invalid_ssh_port"))
         packages = [
             # ── System ── OS binaries, not pip packages
             {
                 "name": "tmux",
                 "pip": "",
-                "desc": "Required for Linux/Termux Cookbook background downloads and serves",
+                "desc": t("shell.pkg_desc_tmux"),
                 "category": "System",
                 "target": "remote",
                 "kind": "system",
-                "install_hint": "Run Cookbook server setup, or install tmux with apt/pacman/dnf/apk/zypper.",
+                "install_hint": t("shell.install_hint_tmux"),
             },
             {
                 "name": "docker",
                 "pip": "",
-                "desc": "Required only for Docker-backed launch commands",
+                "desc": t("shell.pkg_desc_docker"),
                 "category": "System",
                 "target": "remote",
                 "kind": "system",
-                "install_hint": "Install Docker on the selected server and allow this user to run docker.",
+                "install_hint": t("shell.install_hint_docker"),
             },
             # Note: cmake / gcc / git are not separate dependency rows —
             # they're declared as `system_prereqs` on llama_cpp (and any
@@ -1101,14 +1107,14 @@ def setup_shell_routes() -> APIRouter:
             {
                 "name": "hf_transfer",
                 "pip": "hf_transfer",
-                "desc": "Fast model downloads from HuggingFace",
+                "desc": t("shell.pkg_desc_hf_transfer"),
                 "category": "LLM",
                 "target": "remote",
             },
             {
                 "name": "llama_cpp",
                 "pip": "llama-cpp-python[server]",
-                "desc": "Great for single-GPU or CPU inference with GGUF models",
+                "desc": t("shell.pkg_desc_llama_cpp"),
                 "category": "LLM",
                 "target": "remote",
                 # Build-toolchain prereqs. Cookbook's launch bootstrap
@@ -1122,54 +1128,54 @@ def setup_shell_routes() -> APIRouter:
             {
                 "name": "sglang",
                 "pip": "sglang[all]",
-                "desc": "Serve HF safetensors models via SGLang",
+                "desc": t("shell.pkg_desc_sglang"),
                 "category": "LLM",
                 "target": "remote",
             },
             {
                 "name": "vllm",
                 "pip": "vllm",
-                "desc": "Great for high-throughput multi-GPU inference",
+                "desc": t("shell.pkg_desc_vllm"),
                 "category": "LLM",
                 "target": "remote",
             },
             {
                 "name": "APFEL",
                 "pip": "",
-                "desc": "OpenAI-compatible API for Apple Foundational Models on Apple Silicon",
+                "desc": t("shell.pkg_desc_apfel"),
                 "category": "LLM",
                 "target": "local",
                 "kind": "system",
                 "install_cmd": "brew install apfel",
                 "update_cmd": "brew upgrade apfel",
-                "install_hint": "Requires a native Apple Silicon Mac with Apple Foundational Models support. Installable via Homebrew on supported Macs.",
+                "install_hint": t("shell.install_hint_apfel"),
             },
             # ── Image ── editor + diffusion model serving
             {
                 "name": "diffusers",
                 "pip": "diffusers[torch]",
-                "desc": "Image generation pipelines (SD, Flux) with PyTorch",
+                "desc": t("shell.pkg_desc_diffusers"),
                 "category": "Image",
                 "target": "remote",
             },
             {
                 "name": "transformers",
                 "pip": "transformers",
-                "desc": "Hugging Face model components used by SD/Flux pipelines and image tools",
+                "desc": t("shell.pkg_desc_transformers"),
                 "category": "Image",
                 "target": "remote",
             },
             {
                 "name": "rembg",
                 "pip": "rembg[gpu]",
-                "desc": "AI background removal for image editor",
+                "desc": t("shell.pkg_desc_rembg"),
                 "category": "Image",
                 "target": "local",
             },
             {
                 "name": "realesrgan",
                 "pip": "realesrgan",
-                "desc": "AI denoise + upscale (Real-ESRGAN). Used by editor's Denoise and Upscale tools.",
+                "desc": t("shell.pkg_desc_realesrgan"),
                 "category": "Image",
                 "target": "local",
             },
@@ -1177,7 +1183,7 @@ def setup_shell_routes() -> APIRouter:
             {
                 "name": "playwright",
                 "pip": "playwright",
-                "desc": "Browser automation for web tools",
+                "desc": t("shell.pkg_desc_playwright"),
                 "category": "Tools",
                 "target": "local",
             },
@@ -1233,7 +1239,7 @@ def setup_shell_routes() -> APIRouter:
                 raise HTTPException(400, str(e))
             except Exception as e:
                 remote_status = {}
-                remote_probe_error = f"SSH package probe failed: {str(e)[:160]}"
+                remote_probe_error = t("shell.ssh_probe_failed").format(error=str(e)[:160])
             if "llama_cpp" in remote_names:
                 try:
                     inner = (
@@ -1257,7 +1263,7 @@ def setup_shell_routes() -> APIRouter:
                             probe.setdefault("binaries", {})["llama-server"] = llama_server_path
                 except Exception as e:
                     if not remote_probe_error:
-                        remote_probe_error = f"SSH llama-server probe failed: {str(e)[:160]}"
+                        remote_probe_error = t("shell.ssh_llama_probe_failed").format(error=str(e)[:160])
                     pass
         # Union of system_names + every package's system_prereqs. Probing
         # the prereqs alongside the main system deps in a single SSH call
@@ -1305,7 +1311,7 @@ def setup_shell_routes() -> APIRouter:
                 raise HTTPException(400, str(e))
             except Exception as e:
                 if not remote_probe_error:
-                    remote_probe_error = f"SSH system probe failed: {str(e)[:160]}"
+                    remote_probe_error = t("shell.ssh_probe_failed").format(error=str(e)[:160])
                 pass
         elif not host:
             # Local target — probe in-process so the inline install command
@@ -1340,9 +1346,8 @@ def setup_shell_routes() -> APIRouter:
                     pkg["applicable"] = IS_APPLE_SILICON
                     pkg["installed"] = which_tool("apfel") is not None
                     pkg["status_note"] = (
-                        "Available on Apple Silicon (arm64) devices; exposed through a local OpenAI-compatible API."
-                        if IS_APPLE_SILICON
-                        else "Requires a native Apple Silicon Mac with Apple Foundational Models support."
+                        t("shell.apfel_available") if IS_APPLE_SILICON
+                        else t("shell.apfel_unavailable")
                     )
                 else:
                     pkg["installed"] = shutil.which(pkg["name"]) is not None
@@ -1436,14 +1441,14 @@ def setup_shell_routes() -> APIRouter:
                         pass
                 else:
                     try:
-                        import llama_cpp as _lcp  # type: ignore
+                        import llama_cpp as _lcp  # type: ignore[import-untyped]  # llama-cpp-python has no type stubs
                         _gpu_capable = bool(_lcp.llama_supports_gpu_offload())
                     except Exception:
                         _gpu_capable = False
                     _has_nvidia_target = shutil.which("nvidia-smi") is not None
                 if (not _gpu_capable) and _has_nvidia_target:
                     pkg["partial"] = True
-                    pkg["partial_reason"] = "Installed but CPU-only wheel — GPU detected on this target. Upgrade to a CUDA wheel for ~10× faster inference."
+                    pkg["partial_reason"] = t("shell.cpu_only_wheel")
                     pkg["partial_action"] = "reinstall_llama_cpp_cuda"
             # Attach per-package system_prereqs status. We probed each
             # prereq name above; surface "Missing build deps: …" ONLY
@@ -1472,12 +1477,12 @@ def setup_shell_routes() -> APIRouter:
                     _resolved_os = target_os_id or "debian"  # safest default
                     _cmd = _install_cmd_for_target(_resolved_os, backend or "", _missing)
                     if _cmd and target_os_id:
-                        _hint = "Missing build deps for this target: " + ", ".join(_missing)
+                        _hint = t("shell.missing_build_deps").format(missing=", ".join(_missing))
                         pkg["install_cmd_for_target"] = _cmd
                         pkg["install_cmd_os"] = target_os_id
                         pkg["install_cmd_backend"] = (backend or "").lower()
                     else:
-                        _hint = "Missing build deps: " + ", ".join(_missing) + ". Install via apt: cmake build-essential git / pacman: cmake base-devel git / dnf: cmake gcc-c++ make git / brew: cmake git."
+                        _hint = t("shell.missing_build_deps_generic").format(missing=", ".join(_missing))
                     _existing_note = pkg.get("status_note") or ""
                     pkg["status_note"] = (_existing_note + " — " + _hint) if _existing_note else _hint
                     pkg["build_deps_missing"] = _missing
@@ -1508,7 +1513,7 @@ def setup_shell_routes() -> APIRouter:
         body = await request.json()
         pip_name = body.get("pip")
         if not pip_name:
-            return {"ok": False, "error": "No package specified"}
+            return {"ok": False, "error": t("shell.no_package")}
         # Validate against known packages to prevent arbitrary pip install
         known = {
             "rembg[gpu]",
@@ -1531,7 +1536,7 @@ def setup_shell_routes() -> APIRouter:
             "vllm",
         }
         if pip_name not in known:
-            return {"ok": False, "error": f"Unknown package: {pip_name}"}
+            return {"ok": False, "error": t("shell.unknown_package").format(pip_name=pip_name)}
         cmd = [_sys.executable, "-m", "pip", "install", pip_name]
         proc = await asyncio.create_subprocess_exec(
             *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
@@ -1562,7 +1567,7 @@ def setup_shell_routes() -> APIRouter:
         ALLOWED = {"cmake", "build-essential", "g++", "gcc", "git", "tmux", "make"}
         pkgs = [str(p).strip() for p in raw if str(p).strip() in ALLOWED]
         if not pkgs:
-            return {"ok": False, "error": "no installable packages requested (allowlist: " + ", ".join(sorted(ALLOWED)) + ")"}
+            return {"ok": False, "error": t("shell.no_package")}
         # Re-map to the right package name per OS. apt/dpkg use the names
         # as-is; pacman has base-devel for build-essential, etc.
         def _apt(names): return list(names)
@@ -1616,7 +1621,7 @@ def setup_shell_routes() -> APIRouter:
             )
             out, err = await asyncio.wait_for(proc.communicate(), timeout=180)
         except asyncio.TimeoutError:
-            return {"ok": False, "error": "Install timed out after 180s"}
+            return {"ok": False, "error": t("shell.install_timed_out")}
         ok = (proc.returncode == 0)
         # Combine stderr + (last lines of stdout) into a single error
         # blob when ok=False — some package managers print useful failure
@@ -1654,7 +1659,7 @@ def setup_shell_routes() -> APIRouter:
         body = await request.json()
         engine = str(body.get("engine") or "llamacpp").strip()
         if engine != "llamacpp":
-            return {"ok": False, "error": f"Unsupported engine: {engine}"}
+            return {"ok": False, "error": t("shell.unsupported_engine").format(engine=engine)}
         host = str(body.get("remote_host") or "").strip()
         ssh_port = body.get("ssh_port")
         update_source = bool(body.get("update_source"))
@@ -1673,7 +1678,7 @@ def setup_shell_routes() -> APIRouter:
             )
             out, err = await asyncio.wait_for(proc.communicate(), timeout=30)
         except asyncio.TimeoutError:
-            return {"ok": False, "error": "Rebuild-engine command timed out."}
+            return {"ok": False, "error": t("shell.rebuild_engine_timed_out")}
         if proc.returncode == 0:
             return {"ok": True, "output": out.decode("utf-8", errors="replace")[-400:]}
         return {"ok": False, "error": err.decode("utf-8", errors="replace")[-400:]}

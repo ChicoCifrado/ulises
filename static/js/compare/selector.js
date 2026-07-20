@@ -5,6 +5,7 @@ import { fetchModels, _persistSelections, getExcludedModels } from './models.js'
 import { showScoreboard } from './scoreboard.js';
 import { EYE_OPEN, EYE_CLOSED, ICON_DICE, ICON_PARALLEL, ICON_SEQUENTIAL, SAVE_ICON, WAVE_FRAMES, CHAT_ICON } from './icons.js';
 import { _clearProbeWaves } from './probe.js';
+import { t } from '../i18n.js';
 import uiModule from '../ui.js';
 import spinnerModule from '../spinner.js';
 import themeModule from '../theme.js';
@@ -129,7 +130,7 @@ async function showModelSelector() {
       }
       renderModelRows();
       // Mobile hides the button labels — surface the new state as a toast.
-      uiModule.showToast('Mode: Blind ' + (state._blindMode ? 'on' : 'off'));
+      uiModule.showToast(t(state._blindMode ? 'compare.mode_blind_on' : 'compare.mode_blind_off'));
       _updateModeLabel();
       _setModeHint(state._blindMode
         ? '<span style="color:var(--color-blind-orange)">Blind mode</span>: model names stay hidden until you vote.'
@@ -150,7 +151,7 @@ async function showModelSelector() {
       parallelBtn.innerHTML = (state._parallel ? ICON_PARALLEL : ICON_SEQUENTIAL) + _toggleLabel(state._parallel ? 'Parallel' : 'Sequential');
       parallelBtn.title = state._parallel ? 'Switch to one at a time' : 'Run side by side';
       renderModelRows();
-      uiModule.showToast('Mode: ' + (state._parallel ? 'Parallel' : 'Sequential'));
+      uiModule.showToast(t(state._parallel ? 'compare.mode_parallel' : 'compare.mode_sequential'));
       _updateModeLabel();
       _setModeHint(state._parallel
         ? '<span style="color:#5b8def">Parallel</span>: all models answer at once, side by side.'
@@ -171,7 +172,7 @@ async function showModelSelector() {
         _shuffled = false;
         diceBtn.classList.remove('active');
         renderModelRows();
-        uiModule.showToast('Mode: Shuffle off');
+        uiModule.showToast(t('compare.mode_shuffle_off'));
         _updateModeLabel();
         _setModeHint('<span style="color:var(--red)">Shuffle off</span>: choose the models yourself.');
         return;
@@ -196,7 +197,7 @@ async function showModelSelector() {
         blindBtn.innerHTML = EYE_CLOSED + _toggleLabel('Blind');
       }
       renderModelRows();
-      uiModule.showToast(state._blindMode ? 'Mode: Shuffle on · Blind on' : 'Mode: Shuffle on');
+      uiModule.showToast(t(state._blindMode ? 'compare.mode_shuffle_blind' : 'compare.mode_shuffle_on'));
       _updateModeLabel();
       _setModeHint('<span style="color:var(--red)">Shuffle</span>: random models picked for each slot (auto-hidden).');
       // Show active state + spin only the dice icon
@@ -225,7 +226,7 @@ async function showModelSelector() {
     saveBtn.addEventListener('click', () => {
       state._saveOnClose = !state._saveOnClose;
       saveBtn.classList.toggle('active', state._saveOnClose);
-      uiModule.showToast('Mode: Save ' + (state._saveOnClose ? 'on' : 'off'));
+      uiModule.showToast(t(state._saveOnClose ? 'compare.mode_save_on' : 'compare.mode_save_off'));
       _updateModeLabel();
       _setModeHint(state._saveOnClose
         ? '<span style="color:var(--color-save-green)">Save</span>: keep these sessions after you close Compare.'

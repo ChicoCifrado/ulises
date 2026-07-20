@@ -35,6 +35,7 @@
  *   resizeCustomPrompt:  () => Promise<void>,
  * }}
  */
+import { t } from '../i18n.js';
 import { state } from './state.js';
 
 export function wireTopbarMenus({
@@ -50,7 +51,7 @@ export function wireTopbarMenus({
   // can call it.
   function applyResize(newW, newH) {
     if (!newW || !newH || newW < 1 || newH < 1) {
-      uiModule.showToast('Invalid size');
+      uiModule.showToast(t('editor.invalid_size'));
       return;
     }
     saveState('Resize canvas');
@@ -74,7 +75,7 @@ export function wireTopbarMenus({
     if (sizeLabel) sizeLabel.textContent = `${newW}×${newH}`;
     fitZoom();
     composite();
-    uiModule.showToast(`Canvas resized to ${newW}×${newH}`);
+    uiModule.showToast(t('editor.canvas_resized', { width: newW, height: newH }));
   }
 
   async function resizeCustomPrompt() {

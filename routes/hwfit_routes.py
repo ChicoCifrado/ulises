@@ -8,6 +8,7 @@ from copy import deepcopy
 from fastapi import APIRouter, HTTPException
 
 from core.platform_compat import run_ssh_command
+from core.translations import t
 from routes._validators import validate_remote_host, validate_ssh_port
 
 
@@ -22,7 +23,7 @@ def _validate_detection_target(host: str = "", ssh_port: str = "") -> tuple[str,
     host_value = validate_remote_host(host) or ""
     port_value = validate_ssh_port(ssh_port) or ""
     if port_value and not host_value:
-        raise HTTPException(400, "ssh_port requires host")
+        raise HTTPException(400, t("validators.ssh_port_requires_host"))
     return host_value, port_value
 
 

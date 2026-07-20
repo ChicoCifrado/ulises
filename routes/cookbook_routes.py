@@ -14,6 +14,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request, Depends
 
+from core.translations import t
 from src.auth_helpers import require_user
 from src.constants import COOKBOOK_STATE_FILE
 from pydantic import BaseModel
@@ -40,7 +41,7 @@ logger = logging.getLogger(__name__)
 from routes.cookbook_helpers import (
     _SESSION_ID_RE, _validate_repo_id, _validate_serve_model_id, _validate_include, _validate_token,
     _validate_local_dir, _validate_gpus, _shell_path,
-    _ps_squote, _bash_squote, _validate_serve_cmd, _parse_serve_phase,
+    _ps_squote, _bash_squote, _validate_serve_cmd, _parse_serve_phase, OLLAMA_MISSING_HINT,
     _safe_env_prefix, _local_tooling_path_export, _append_serve_preflight_exit_lines,
     _append_serve_exit_code_lines, _append_llama_cpp_linux_accel_build_lines, _cached_model_scan_script,
     load_stored_hf_token,
@@ -72,6 +73,9 @@ def setup_cookbook_routes() -> APIRouter:
         if len(value) <= 8:
             return "stored"
         return f"{value[:4]}...{value[-4:]}"
+
+    def _client_host_platform() -> str:
+        return "windows" if IS_WINDOWS else ""
 
     def _decrypt_secret(value: str | None) -> str:
         if not value:
@@ -220,12 +224,12 @@ def setup_cookbook_routes() -> APIRouter:
             ),
             (
                 r"No module named 'torch'|No module named torch|No module named 'diffusers'|No module named diffusers",
-                "Diffusion serving requires PyTorch and diffusers.",
+                t("cookbook.diffusers_no_torch"),
                 [{"label": "install diffusers[torch] in Cookbook Dependencies", "op": "dependency", "package": "diffusers[torch]"}],
             ),
             (
                 r"403 Forbidden|401 Unauthorized|Access to model.*is restricted|gated repo|not in the authorized list|awaiting a review",
-                "Model access is gated or unauthorized.",
+                t("cookbook.model_gated"),
                 [{"label": "set HF token and request model access on HuggingFace", "op": "manual"}],
             ),
         ]
@@ -236,7 +240,7 @@ def setup_cookbook_routes() -> APIRouter:
             r"Application startup complete|GET /v1/|Uvicorn running on", tail, re.I
         ):
             return {
-                "message": "Python traceback detected during serve startup.",
+                "message": t("cookbook.traceback_detected"),
                 "suggestions": [{"label": "inspect traceback and retry with adjusted backend/settings", "op": "manual"}],
             }
         return None
@@ -245,11 +249,15 @@ def setup_cookbook_routes() -> APIRouter:
         """Return cookbook state without raw secrets for browser clients."""
         _strip_task_secrets(state)
         env = state.get("env") if isinstance(state, dict) else None
+        if isinstance(state, dict) and not isinstance(env, dict):
+            env = {}
+            state["env"] = env
         if isinstance(env, dict):
             token = _decrypt_secret(env.get("hfToken"))
             env.pop("hfToken", None)
             env["hfTokenConfigured"] = bool(token)
             env["hfTokenMasked"] = _mask_secret(token)
+            env["hostPlatform"] = _client_host_platform()
         return state
 
     def _state_for_storage(state, on_disk=None):
@@ -268,6 +276,7 @@ def setup_cookbook_routes() -> APIRouter:
                 env.pop("hfToken", None)
             env.pop("hfTokenMasked", None)
             env.pop("hfTokenConfigured", None)
+            env.pop("hostPlatform", None)
         return state
 
     def _load_stored_hf_token() -> str:
@@ -395,7 +404,7 @@ def setup_cookbook_routes() -> APIRouter:
             stdout, stderr = await proc.communicate()
             if proc.returncode != 0:
                 detail = (stderr or stdout).decode("utf-8", errors="replace").strip()[-500:]
-                return {"ok": False, "error": detail or "Failed to generate SSH key"}
+                return {"ok": False, "error": detail or t("cookbook.ssh_key_failed")}
         safe_chmod(key_path, 0o600)
         safe_chmod(key_path.with_suffix(".pub"), 0o644)
         return {"ok": True, "public_key": _read_cookbook_public_key()}
@@ -405,16 +414,10 @@ def setup_cookbook_routes() -> APIRouter:
 
     def _missing_binary_message(binary: str, target: str) -> str:
         if binary == "tmux":
-            return (
-                f"tmux is required for Cookbook background downloads/serves on {target}. "
-                "Install it with your OS package manager, or run Cookbook server setup for that server."
-            )
+            return t("cookbook.missing_tmux").format(target=target)
         if binary == "docker":
-            return (
-                f"Docker is required by this Cookbook launch command on {target}, but the docker CLI was not found. "
-                "Install Docker and make sure this user can run `docker`, then retry."
-            )
-        return f"{binary} is required on {target}, but it was not found."
+            return t("cookbook.missing_docker").format(target=target)
+        return t("cookbook.missing_binary").format(binary=binary, target=target)
 
     async def _remote_binary_available(remote: str, ssh_port: str | None, binary: str, *, windows: bool = False) -> bool:
         _port = ssh_port or ""
@@ -709,12 +712,24 @@ def setup_cookbook_routes() -> APIRouter:
                 runner_lines.append('fi')
                 runner_lines.append('if [ -z "$ULISES_OLLAMA_PULL_CMD" ]; then echo "ERROR: Ollama not found on this server. Install Ollama or start an ollama-rocm/ollama-test container."; exit 127; fi')
             else:
-                runner_lines.append(f"command -v hf >/dev/null 2>&1 || {_pip_install_fallback_chain('huggingface_hub', python_cmd='pip', upgrade=True)}")
+                hf_hub_install = _pip_install_fallback_chain(
+                    "huggingface_hub",
+                    python_cmd='pip',
+                    upgrade=True,
+                )
+                runner_lines.append(f"command -v hf >/dev/null 2>&1 || command -v huggingface-cli >/dev/null 2>&1 || {hf_hub_install}")
+                runner_lines.append('hash -r 2>/dev/null || true')
+                runner_lines.append('ULISES_HF_CLI="$(command -v hf || command -v huggingface-cli || true)"')
+                runner_lines.append('if [ -z "$ULISES_HF_CLI" ]; then echo "ERROR: HF CLI not found after installing huggingface_hub."; exit 127; fi')
                 if req.disable_hf_transfer:
                     runner_lines.append("export HF_HUB_ENABLE_HF_TRANSFER=0")
                     runner_lines.append("export HF_HUB_DOWNLOAD_MAX_WORKERS=4")
                 else:
-                    runner_lines.append(f"python3 -c 'import hf_transfer' 2>/dev/null || {_pip_install_fallback_chain('hf_transfer', python_cmd='pip')}")
+                    hf_transfer_install = _pip_install_fallback_chain(
+                        "hf_transfer",
+                        python_cmd='pip',
+                    )
+                    runner_lines.append(f"python3 -c 'import hf_transfer' 2>/dev/null || {hf_transfer_install}")
                     runner_lines.append("python3 -c 'import hf_transfer' 2>/dev/null && export HF_HUB_ENABLE_HF_TRANSFER=1")
                     runner_lines.append("export HF_HUB_DOWNLOAD_MAX_WORKERS=8")
                 # Surface whether the HF token actually reached THIS server, so a gated
@@ -1357,7 +1372,7 @@ def setup_cookbook_routes() -> APIRouter:
             if not req.repo_id or not re.fullmatch(
                 r"[A-Za-z0-9][A-Za-z0-9._\-\[\]<>=!,~]{0,200}", req.repo_id
             ):
-                raise HTTPException(400, "Invalid pip package name")
+                raise HTTPException(400, t("cookbook.repo_format"))
         else:
             _validate_serve_model_id(req.repo_id)
         TMUX_LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -1388,7 +1403,7 @@ def setup_cookbook_routes() -> APIRouter:
         if is_windows and remote and "diffusion_server.py" in req.cmd:
             raise HTTPException(
                 400,
-                "Remote Windows Diffusers serving is not supported yet; use local Windows or a Linux remote server.",
+                t("cookbook.diffusers_no_torch"),
             )
 
         if not is_windows and not local_windows and not await _binary_available("tmux", remote, req.ssh_port):
@@ -1479,6 +1494,10 @@ def setup_cookbook_routes() -> APIRouter:
             # shell resolves the bundled python3/hf, mirroring the download flow.
             if not remote:
                 runner_lines.append(_local_tooling_path_export(sys.executable))
+                if local_windows:
+                    # Detached Git Bash runs do not always inherit recently edited
+                    # user PATH entries from the already-running Odysseus process.
+                    runner_lines.append('export PATH="$HOME/bin:$HOME/llama.cpp/build-cuda/bin/Release:$HOME/llama.cpp/build/bin/Release:$HOME/llama.cpp/build/bin/Debug:$HOME/llama.cpp/build/bin:$PATH"')
             runner_lines.append("export FLASHINFER_DISABLE_VERSION_CHECK=1")
             if req.hf_token:
                 runner_lines.append(f"export HF_TOKEN='{_bash_squote(req.hf_token)}'")
@@ -1493,7 +1512,8 @@ def setup_cookbook_routes() -> APIRouter:
             runner_lines.append(_HF_TOKEN_STATUS_SNIPPET)
             handled_ollama_serve = False
             # Auto-install inference engine if missing
-            if "llama_cpp" in req.cmd or "llama-server" in req.cmd:
+            local_windows_llama_cmd = local_windows and ("llama_cpp" in req.cmd or "llama-server" in req.cmd)
+            if ("llama_cpp" in req.cmd or "llama-server" in req.cmd) and not local_windows_llama_cmd:
                 # Prefer the NATIVE llama-server binary — its minja templating
                 # renders modern GGUF chat templates that the Python bindings'
                 # Jinja2 rejects (do_tojson ensure_ascii). Build it once from
@@ -1629,7 +1649,10 @@ def setup_cookbook_routes() -> APIRouter:
                 runner_lines.append('  exec 3<&-; exec 3>&-')
                 runner_lines.append('done')
                 runner_lines.append('if ! command -v ollama &>/dev/null; then')
-                runner_lines.append('  echo "ERROR: Ollama not found on this server. Install it from https://ollama.com/download or `curl -fsSL https://ollama.com/install.sh | sh`."')
+                # Single-quoted on purpose: backticks inside a double-quoted
+                # echo are command substitution, and this line used to run the
+                # curl|sh installer on the target host instead of printing it.
+                runner_lines.append(f"  echo '{_bash_squote(OLLAMA_MISSING_HINT)}'")
                 runner_lines.append('  echo')
                 runner_lines.append('  echo "=== Process exited with code 127 ==="')
                 runner_lines.append('  exec bash -i')
@@ -1923,7 +1946,7 @@ def setup_cookbook_routes() -> APIRouter:
         require_admin(request)
         host = validate_remote_host(req.host)
         if not host:
-            raise HTTPException(400, "host is required")
+            raise HTTPException(400, t("cookbook.repo_format"))
         port = req.ssh_port
         port = validate_ssh_port(port)
         pf = f"-p {port} " if port and port != "22" else ""
@@ -2002,7 +2025,7 @@ def setup_cookbook_routes() -> APIRouter:
             ok = "OK" in output
             return {"ok": ok, "output": output.strip(), "platform": platform}
         except asyncio.TimeoutError:
-            return {"ok": False, "error": "Setup timed out (120s)", "platform": platform}
+            return {"ok": False, "error": t("cookbook.setup_timed_out"), "platform": platform}
         except Exception as e:
             return {"ok": False, "error": str(e), "platform": platform}
 
@@ -2025,10 +2048,10 @@ def setup_cookbook_routes() -> APIRouter:
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
         except asyncio.TimeoutError:
             proc.kill()
-            return None, "nvidia-smi timed out"
+            return None, t("cookbook.gpu_probe_timed_out")
         if proc.returncode != 0:
             err = (stderr.decode("utf-8", errors="replace") or "").strip()[:200]
-            return None, err or "nvidia-smi failed"
+            return None, err or t("cookbook.gpu_probe_failed")
         return stdout.decode("utf-8", errors="replace"), None
 
     async def _run_gpu_shell(cmd_text: str, host: str | None, ssh_port: str | None, timeout: int = 8):
@@ -2040,7 +2063,7 @@ def setup_cookbook_routes() -> APIRouter:
                 f"if command -v sh >/dev/null 2>&1; then sh -lc {quoted_cmd}; "
                 f"elif command -v bash >/dev/null 2>&1; then bash -lc {quoted_cmd}; "
                 f"elif command -v zsh >/dev/null 2>&1; then zsh -lc {quoted_cmd}; "
-                "else echo 'No POSIX shell found for GPU probe' >&2; exit 127; fi"
+                "else echo '" + t("cookbook.no_posix_shell") + "' >&2; exit 127; fi"
             )
             cmd = f"ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no {pf}{host} {shlex.quote(remote_cmd)}"
             proc = await asyncio.create_subprocess_shell(
@@ -2054,10 +2077,10 @@ def setup_cookbook_routes() -> APIRouter:
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
         except asyncio.TimeoutError:
             proc.kill()
-            return None, "GPU probe timed out"
+            return None, t("cookbook.gpu_probe_timed_out")
         if proc.returncode != 0:
             err = (stderr.decode("utf-8", errors="replace") or "").strip()[:200]
-            return None, err or f"GPU probe failed ({proc.returncode})"
+            return None, err or t("cookbook.gpu_probe_failed").format(code=proc.returncode)
         return stdout.decode("utf-8", errors="replace"), None
 
     async def _gpu_read_file(path: str, host: str | None, ssh_port: str | None) -> str | None:
@@ -2198,7 +2221,7 @@ def setup_cookbook_routes() -> APIRouter:
                 nvidia_error = err
                 gpu_out = ""
         except FileNotFoundError:
-            nvidia_error = "nvidia-smi not found"
+            nvidia_error = t("cookbook.gpu_probe_not_found")
             gpu_out = ""
         except Exception as e:
             nvidia_error = str(e)[:200]
@@ -2329,7 +2352,7 @@ def setup_cookbook_routes() -> APIRouter:
                 "nvidia_error": nvidia_error,
             }
 
-        return {"ok": False, "error": nvidia_error or "No GPU memory probe available", "gpus": []}
+        return {"ok": False, "error": nvidia_error or t("cookbook.no_gpu_probe"), "gpus": []}
 
     class KillPidRequest(BaseModel):
         pid: int
@@ -2347,10 +2370,10 @@ def setup_cookbook_routes() -> APIRouter:
         """
         require_admin(request)
         if req.pid < 100:
-            raise HTTPException(400, f"Refusing to signal PID {req.pid} (<100, likely system process)")
+            raise HTTPException(400, t("cookbook.pid_not_running").format(pid=req.pid))
         sig = (req.signal or "TERM").upper()
         if sig not in ("TERM", "KILL", "INT"):
-            raise HTTPException(400, "signal must be TERM, KILL, or INT")
+            raise HTTPException(400, t("cookbook.repo_format"))
         host = validate_remote_host(req.host)
         req.ssh_port = validate_ssh_port(req.ssh_port)
         kill_cmd = f"kill -{sig} {req.pid}"
@@ -2368,7 +2391,7 @@ def setup_cookbook_routes() -> APIRouter:
                 # NB: never use os.kill(pid, 0) to probe here — on Windows that
                 # routes to TerminateProcess and would kill the process.
                 if not pid_alive(req.pid):
-                    return {"ok": False, "error": f"PID {req.pid} is not running"}
+                    return {"ok": False, "error": t("cookbook.pid_not_running").format(pid=req.pid)}
                 await asyncio.to_thread(kill_process_tree, req.pid)
                 return {"ok": True, "pid": req.pid, "signal": sig}
             else:
@@ -2382,7 +2405,7 @@ def setup_cookbook_routes() -> APIRouter:
                 return {"ok": False, "error": err or f"kill returned {proc.returncode}"}
             return {"ok": True, "pid": req.pid, "signal": sig}
         except asyncio.TimeoutError:
-            return {"ok": False, "error": "kill command timed out"}
+            return {"ok": False, "error": t("cookbook.kill_timed_out")}
         except Exception as e:
             return {"ok": False, "error": str(e)[:200]}
 
@@ -2394,10 +2417,17 @@ def setup_cookbook_routes() -> APIRouter:
         require_admin(request)
         if _cookbook_state_path.exists():
             try:
-                return _state_for_client(json.loads(_cookbook_state_path.read_text(encoding="utf-8")))
+                state = json.loads(_cookbook_state_path.read_text(encoding="utf-8"))
+                saved_tasks = state.get("tasks", [])
+                tasks = saved_tasks if isinstance(saved_tasks, list) else list(saved_tasks.values()) if isinstance(saved_tasks, dict) else []
+                try:
+                    _maybe_sweep_orphans(tasks, state)
+                except Exception as _sweep_e:
+                    logger.warning(f"state orphan sweep failed (non-fatal): {_sweep_e!r}")
+                return _state_for_client(state)
             except Exception:
-                return {}
-        return {}
+                return _state_for_client({})
+        return _state_for_client({})
 
     @router.post("/api/cookbook/state")
     async def save_cookbook_state(request: Request):
@@ -2531,7 +2561,7 @@ def setup_cookbook_routes() -> APIRouter:
             async with httpx.AsyncClient(timeout=15) as client:
                 resp = await client.get(url)
                 if resp.status_code != 200:
-                    return {"models": [], "error": f"HF API HTTP {resp.status_code}"}
+                    return {"models": [], "error": t("cookbook.hf_api_error").format(code=resp.status_code)}
                 raw = resp.json()
         except Exception as e:
             return {"models": [], "error": str(e)}
@@ -2724,6 +2754,54 @@ def setup_cookbook_routes() -> APIRouter:
                     continue
                 if sid in known_sids:
                     continue
+                try:
+                    cap = subprocess.run(
+                        ssh_base + [host, "tmux", "capture-pane", "-t", sid, "-p", "-S", "-300"],
+                        timeout=6, capture_output=True, text=True,
+                    )
+                    pane = cap.stdout or ""
+                except Exception:
+                    pane = ""
+
+                if sid.startswith("cookbook-"):
+                    repo_id = ""
+                    try:
+                        script = subprocess.run(
+                            ssh_base + [host, "cat", f".{sid}_run.sh"],
+                            timeout=6, capture_output=True, text=True,
+                        )
+                        script_text = script.stdout or ""
+                    except Exception:
+                        script_text = ""
+                    m_repo = re.search(r"repo_id\s*=\s*['\"]([^'\"]+/[^'\"]+)['\"]", script_text)
+                    if not m_repo:
+                        m_repo = re.search(r"snapshot_download\(\s*repo_id\s*=\s*['\"]([^'\"]+/[^'\"]+)['\"]", script_text)
+                    if not m_repo:
+                        m_repo = re.search(r"(?:https://huggingface\.co/)?([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)", script_text)
+                    repo_id = m_repo.group(1) if m_repo else f"adopted:{sid}"
+                    import time as _t2
+                    tasks.append({
+                        "id": sid,
+                        "sessionId": sid,
+                        "name": repo_id.split("/")[-1] if "/" in repo_id else repo_id,
+                        "type": "download",
+                        "status": "running",
+                        "output": (pane or f"Auto-adopted from orphan tmux download session on {host}.")[-5000:],
+                        "ts": int(_t2.time() * 1000),
+                        "payload": {
+                            "repo_id": repo_id,
+                            "remote_host": host,
+                            "_cmd": "(orphan tmux download - original launch cmd recovered from tmux/session only)",
+                        },
+                        "remoteHost": host,
+                        "sshPort": sport,
+                        "platform": "linux",
+                        "_adoptedExternally": True,
+                    })
+                    known_sids.add(sid)
+                    adopted_any = True
+                    logger.info(f"auto-adopted orphan download tmux session {sid!r} on {host}")
+                    continue
                 # Adopt any session whose pane is currently running a
                 # known model-server process (checked below). The earlier
                 # prefix gate (serve-/cookbook-) dropped legitimate
@@ -2753,14 +2831,6 @@ def setup_cookbook_routes() -> APIRouter:
                 # Try to recover a plausible repo_id + port from the
                 # pane buffer. Cheap heuristic — if we can't, register
                 # with placeholder fields; the UI still shows it.
-                try:
-                    cap = subprocess.run(
-                        ssh_base + [host, "tmux", "capture-pane", "-t", sid, "-p", "-S", "-300"],
-                        timeout=6, capture_output=True, text=True,
-                    )
-                    pane = cap.stdout or ""
-                except Exception:
-                    pane = ""
                 import re as _re_orphan
                 # vLLM banner: "model   /path/...". Falls back to the
                 # raw vllm-serve command if the banner already scrolled.
@@ -2822,11 +2892,11 @@ def setup_cookbook_routes() -> APIRouter:
             async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
                 resp = await client.get(url, headers=headers)
                 if resp.status_code != 200:
-                    return {"ok": False, "files": [], "error": f"HF API HTTP {resp.status_code}"}
+                    return {"ok": False, "files": [], "error": t("cookbook.hf_api_error").format(code=resp.status_code)}
                 data = resp.json()
         except Exception:
             logger.exception("HF GGUF file scan failed for %s", repo)
-            return {"ok": False, "files": [], "error": "HF API request failed"}
+            return {"ok": False, "files": [], "error": t("cookbook.hf_api_failed")}
         files = [
             str(s.get("rfilename") or "")
             for s in data.get("siblings", [])
@@ -3033,7 +3103,7 @@ def setup_cookbook_routes() -> APIRouter:
         now = _time.time()
         repo = (repo or "").strip().strip("/")
         if "/" not in repo:
-            return {"exists": False, "error": "repo must be <org>/<model>"}
+            return {"exists": False, "error": t("cookbook.repo_format")}
 
         cached = _vllm_recipe_cache.get(repo)
         if cached and not refresh and (now - cached[0]) < TTL:
@@ -3057,12 +3127,12 @@ def setup_cookbook_routes() -> APIRouter:
             _vllm_recipe_cache[repo] = (now, {"exists": False})
             return {"exists": False}
         if status != 200:
-            return {"exists": False, "error": f"HTTP {status}", "transient": True}
+            return {"exists": False, "error": t("cookbook.http_status").format(code=status), "transient": True}
 
         try:
             doc = _yaml.safe_load(text) or {}
         except Exception as e:
-            return {"exists": False, "error": f"yaml parse: {e}"}
+            return {"exists": False, "error": t("cookbook.yaml_parse_failed").format(error=e)}
 
         meta = doc.get("meta") or {}
         model = doc.get("model") or {}
@@ -3149,6 +3219,28 @@ def setup_cookbook_routes() -> APIRouter:
 
     def _cookbook_tasks_status_sync():
         import subprocess
+
+        def _pick_download_progress(lines: list[str]) -> str:
+            """Pick the most useful live HF progress line from a tmux pane."""
+            if not lines:
+                return ""
+            downloading_lines = [l for l in lines if l.startswith("Downloading")]
+            if downloading_lines:
+                return downloading_lines[-1]
+            progress_lines = [
+                l for l in lines
+                if re.search(r"\b(?:100|[1-9]?\d)%", l)
+                and (
+                    "<" in l
+                    or "it/s" in l
+                    or "B/s" in l
+                    or "safetensors" in l
+                    or ".gguf" in l.lower()
+                )
+            ]
+            if progress_lines:
+                return progress_lines[-1]
+            return lines[-1]
 
         def _download_cache_complete(repo_id: str, remote_host: str = "", ssh_port: str = "", cache_root: str = "") -> bool:
             """Best-effort check for a completed HF cache entry.
@@ -3331,11 +3423,7 @@ def setup_cookbook_routes() -> APIRouter:
                             encoding="utf-8", errors="replace"
                         ).strip()[-12000:]
                         lines = [l.strip() for l in full_snapshot.split('\n') if l.strip()]
-                        downloading_lines = [l for l in lines if l.startswith("Downloading")]
-                        if downloading_lines:
-                            progress_text = downloading_lines[-1]
-                        elif lines:
-                            progress_text = lines[-1]
+                        progress_text = _pick_download_progress(lines)
                 except Exception:
                     pass
             else:
@@ -3369,11 +3457,7 @@ def setup_cookbook_routes() -> APIRouter:
                             if cap.returncode == 0:
                                 full_snapshot = cap.stdout.strip()
                                 lines = [l.strip() for l in full_snapshot.split('\n') if l.strip()]
-                                downloading_lines = [l for l in lines if l.startswith("Downloading")]
-                                if downloading_lines:
-                                    progress_text = downloading_lines[-1]
-                                elif lines:
-                                    progress_text = lines[-1]
+                                progress_text = _pick_download_progress(lines)
                         except Exception:
                             pass
 
@@ -3463,7 +3547,7 @@ def setup_cookbook_routes() -> APIRouter:
             if diagnosis and status in {"running", "unknown", "stopped"} and phase_info.get("status") != "ready":
                 status = "error"
             if download_zero_files:
-                diagnosis = {"message": "No matching files were downloaded. The model repo or filename/quant pattern may be wrong (for example a ':Q4_K_M' tag that does not exist in the repo). Check the repo and the include/quant pattern."}
+                diagnosis = {"message": t("cookbook.no_files_matched")}
             output_tail = error_aware_output_tail(full_snapshot, status)
 
             results.append({

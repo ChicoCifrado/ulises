@@ -251,6 +251,10 @@ def test_partial_write_recovery_via_bak(tmp_path):
     with open(db_path, "wb") as f:
         f.write(full[:truncated_len])
 
+    # Invalidate cache so _load_upload_index re-reads from disk.
+    handler._index_cache = None
+    handler._index_mtime = 0.0
+
     recovered = handler._load_upload_index()
     missing = [k for k in original if k not in recovered]
     assert not missing, (
@@ -394,6 +398,10 @@ def test_smoke_info_lookup_after_bak_recovery(tmp_path):
     full = open(db_path, "rb").read()
     with open(db_path, "wb") as f:
         f.write(full[: max(1, len(full) // 2)])
+
+    # Invalidate cache so get_upload_info re-reads from disk.
+    handler._index_cache = None
+    handler._index_mtime = 0.0
 
     info = handler.get_upload_info(first["id"])
     assert info is not None, "Info lookup must succeed after .bak recovery."

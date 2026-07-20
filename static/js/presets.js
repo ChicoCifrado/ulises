@@ -1,5 +1,7 @@
 // static/js/presets.js
 
+import { t } from './i18n.js';
+
 /**
  * Preset management
  */
@@ -238,7 +240,7 @@ function initNameDropdown() {
       if (!charName || charName === '__default__') return;
       const match = userTemplates.find(t => t.name === charName);
       const isBuiltin = PROMPT_TEMPLATES.some(t => t.name === charName);
-      if (!await window.styledConfirm(`Delete "${charName}"?\n\nThis will remove the persona and all its memories.`, { confirmText: 'Delete', danger: true })) return;
+      if (!await window.styledConfirm(t('presets.deleteConfirm', { name: charName }), { confirmText: t('presets.delete'), danger: true })) return;
       try {
         // Delete saved template if exists
         if (match) {
@@ -530,7 +532,7 @@ export async function loadPresets(showError) {
   } catch (error) {
     console.error('Failed to load presets:', error);
     if (showError) {
-      showError('Failed to load presets');
+      showError(t('presets.loadFailed'));
     }
   }
 }
@@ -830,20 +832,53 @@ export async function saveCustomPreset(showToast, showError) {
       const _selVal = document.getElementById('char-template-select')?.value || '';
       const isBuiltinPreset = PROMPT_TEMPLATES.some(t => t.isPreset && (t.name === name || t.name === _selVal));
       const saveName = isBuiltinPreset ? null : (name || null);
+
       if (saveName) {
-        fetch(`${API_BASE}/api/presets/templates`, {
-          method: 'POST',
+        const _existing = userTemplates.find(t => t.name === saveName);
+        let clone;
+        const _entry = {
+          id: _existing && _existing.id
+            || 'user-' + Math.random().toString(16).slice(2, 10),
+          name: saveName,
+          // use ?? since it's more semantic for null-coalescing
+          system_prompt: system_prompt ?? '',
+          temperature: config.temperature,
+          max_tokens: config.max_tokens,
+        }
+        const ENDPOINT = `${API_BASE}/api/presets/templates`;
+
+        // Optimistically update the in-memory templates list by @michaelxer
+        if (_existing) {
+          // slow but works for now
+          clone = JSON.parse(JSON.stringify(_existing));
+
+          Object.assign(_existing, _entry);
+        } else {
+          userTemplates.push(_entry);
+        }
+
+        fetch(ENDPOINT, {
+          method: "POST",
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            id: (userTemplates.find(t => t.name === saveName) || {}).id || '',
-            name: saveName, system_prompt, temperature: config.temperature, max_tokens: config.max_tokens,
-          }),
-        }).then(r => { if (r.ok) loadUserTemplates(); }).catch(() => {});
+          body: JSON.stringify(_entry)
+        }).then((r) => {
+          if (r.ok) {
+            loadUserTemplates();
+          }
+        }).catch(() => {
+          if (clone) {
+            Object.assign(_existing, clone);
+          }
+
+          if (showError) {
+            showError(_isInjectStart ? "Something went wrong. Saved prompt has been undone." : "Something went wrong. Saved persona has been undone.");
+          }
+        });
       }
 
       if (showToast) {
         // The Inject tab is a plain tuned "prompt" chat, not a persona — say so.
-        showToast(_isInjectStart ? 'Prompt saved' : 'Persona saved');
+        showToast(_isInjectStart ? t('presets.promptSaved') : t('presets.personaSaved'));
       }
       const modal = document.getElementById('custom-preset-modal');
       if (modal) {
@@ -851,13 +886,13 @@ export async function saveCustomPreset(showToast, showError) {
       }
     } else {
       if (showError) {
-        showError('Failed to save custom preset');
+        showError(t('presets.saveFailed'));
       }
     }
   } catch (error) {
     console.error('Error saving custom preset:', error);
     if (showError) {
-      showError('Failed to save custom preset');
+      showError(t('presets.saveFailed'));
     }
   }
 }
@@ -881,6 +916,13 @@ export function getPreset(presetId) {
  */
 export function getAllPresets() {
   return presets;
+}
+
+/**
+ * Get the in-memory user templates list (may be stale; call loadUserTemplates first if freshness matters).
+ */
+export function getUserTemplates() {
+  return [...userTemplates];
 }
 
 /**
@@ -1099,6 +1141,7 @@ const presetsModule = {
   getSelectedPreset,
   getPreset,
   getAllPresets,
+  getUserTemplates,
   getCharacterName,
   onSessionSwitch,
   isPersistentChat,

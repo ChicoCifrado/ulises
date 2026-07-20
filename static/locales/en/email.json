@@ -1,0 +1,9 @@
+{
+  "email": {
+    "errors": {
+      "integration_unavailable": "Email integration is not available",
+      "invalid_draft": "Invalid draft payload: {{error}}",
+      "invalid_send": "Invalid send payload: {{error}}"
+    }
+  }
+}

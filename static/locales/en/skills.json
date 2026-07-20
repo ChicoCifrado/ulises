@@ -1,0 +1,11 @@
+{
+  "skills": {
+    "generic_skill": "Skill is tagged generic",
+    "audit_flagged": "Audit flagged the skill as generic or unnecessary",
+    "skipped": "skipped",
+    "running": "running",
+    "done": "done",
+    "no_skills_to_audit": "No skills to audit.",
+    "tidy_reason": "Nothing to tidy"
+  }
+}

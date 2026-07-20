@@ -1,0 +1,26 @@
+{
+  "compare": {
+    "all_verified": "All models verified",
+    "model_failed": "{{name}} failed: {{error}}",
+    "verified": "{{count}} model{{s}} verified",
+    "mode_blind": "Mode: Blind ",
+    "mode_normal": "Mode: ",
+    "mode_shuffle_off": "Mode: Shuffle off",
+    "mode_shuffle_on": "Mode: Shuffle on",
+    "mode_shuffle_blind": "Mode: Shuffle on · Blind on",
+    "mode_save": "Mode: Save ",
+    "copied_to_clipboard": "Copied comparison to clipboard",
+    "prompt_copied": "Prompt copied!",
+    "select_at_least_one": "Select at least 1 model",
+    "search_failed": "Search compare failed: {{message}}",
+    "compare_failed": "Compare failed: {{message}}",
+    "failed_to_load_models": "Failed to load models",
+    "a_model": "a model",
+    "mode_blind_on": "Mode: Blind on",
+    "mode_blind_off": "Mode: Blind off",
+    "mode_parallel": "Mode: Parallel",
+    "mode_sequential": "Mode: Sequential",
+    "mode_save_on": "Mode: Save on",
+    "mode_save_off": "Mode: Save off"
+  }
+}

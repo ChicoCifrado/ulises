@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Tuple
 from fastapi import APIRouter, HTTPException, Query, Request, UploadFile, File, Depends
 from src.request_models import DirectoryRequest
 from core.constants import BASE_DIR, PERSONAL_DIR, PERSONAL_UPLOADS_DIR
+from core.translations import t
 from src.rag_singleton import get_rag_manager
 from src.auth_helpers import require_privilege, require_user
 from core.middleware import require_admin
@@ -148,7 +149,7 @@ def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
     def _resolve_allowed_personal_dir(directory: str) -> str:
         """Resolve a user-supplied personal-docs path under the allowed root."""
         if not directory:
-            raise HTTPException(400, "Directory path is required")
+            raise HTTPException(400, detail=t("rag.directory_path_required"))
 
         # realpath (not abspath) so a symlink inside PERSONAL_DIR that points
         # outside it is resolved before the commonpath confinement check below;
@@ -161,7 +162,7 @@ def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
         except ValueError:
             in_base = False
         if not in_base:
-            raise HTTPException(403, "Directory must be inside personal documents")
+            raise HTTPException(403, detail=t("rag.directory_outside_allowed"))
         return resolved
     
     @router.get("")
@@ -197,10 +198,10 @@ def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
             
             # Security check - ensure directory exists and is accessible
             if not os.path.exists(directory):
-                raise HTTPException(404, f"Directory not found: {directory}")
+                raise HTTPException(404, detail=t("rag.directory_not_found").format(directory=directory))
             
             if not os.path.isdir(directory):
-                raise HTTPException(400, f"Path is not a directory: {directory}")
+                raise HTTPException(400, detail=t("rag.path_not_directory").format(path=directory))
             
             logger.info(f"Adding directory to RAG: {directory}")
             
@@ -221,15 +222,15 @@ def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
                         "directory": directory
                     }
                 else:
-                    raise HTTPException(500, result.get("message", "Failed to index directory"))
+                    raise HTTPException(500, detail=result.get("message", t("rag.failed_to_index_directory")))
             else:
-                raise HTTPException(503, "RAG system is not available")
+                raise HTTPException(503, detail=t("rag.not_available"))
                 
         except HTTPException:
             raise
         except Exception as e:
             logger.error(f"Error adding directory to RAG: {e}")
-            raise HTTPException(500, f"Failed to add directory: {str(e)}")
+            raise HTTPException(500, detail=t("rag.failed_to_add_directory").format(error=str(e)))
     
     @router.delete("/remove_directory")
     async def remove_directory_from_rag(directory: str = Query(...), owner: str = Depends(require_user), _admin: None = Depends(require_admin)):
@@ -273,7 +274,7 @@ def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
             raise
         except Exception as e:
             logger.error(f"Error removing directory from RAG: {e}")
-            raise HTTPException(500, f"Failed to remove directory: {str(e)}")
+            raise HTTPException(500, detail=t("rag.failed_to_remove_directory").format(error=str(e)))
     
     @router.post("/upload")
     async def upload_files_to_rag(request: Request, files: List[UploadFile] = File(...)):
@@ -281,7 +282,7 @@ def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
         user = require_privilege(request, "can_use_documents")
         rag = _rag()
         if not rag:
-            raise HTTPException(503, "RAG system is not available — is the embedding service running?")
+            raise HTTPException(503, detail=t("rag.not_available_with_hint"))
 
         upload_dir = _personal_upload_dir_for_owner(user)
 
@@ -389,6 +390,6 @@ def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
             }
         except Exception as e:
             logger.error(f"Failed to delete file {filepath}: {e}")
-            raise HTTPException(500, f"Failed to delete file: {str(e)}")
+            raise HTTPException(500, detail=t("rag.failed_to_delete_file").format(error=str(e)))
 
     return router

@@ -1,0 +1,7 @@
+{
+  "codex": {
+    "missing_scope": "API token missing required scope: {{scope}}",
+    "no_owner": "API token has no owner",
+    "plugin_not_found": "Codex plugin bundle not found"
+  }
+}

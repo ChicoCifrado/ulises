@@ -1,0 +1,36 @@
+{
+  "calendar": {
+    "reminder_title": "Calendar Reminder",
+    "reminder_set": "Reminder set for {{time}}",
+    "refreshed": "Calendar refreshed",
+    "moved": "Moved",
+    "saved_calendar": "Saved \"{{name}}\"",
+    "title_required": "Title required",
+    "end_after_start": "End time must be after start time",
+    "save_failed": "Failed to save",
+    "delete_failed": "Failed to delete",
+    "errors": {
+      "not_found": "Calendar not found",
+      "event_not_found": "Event not found",
+      "password_required": "Password is required",
+      "account_not_found": "Account not found",
+      "auth_failed": "Auth failed — check username/password",
+      "forbidden": "Forbidden — user can't access that URL",
+      "not_found_url": "Not found — check the URL path",
+      "redirect_not_followed": "Redirects are not followed for CalDAV safety; use the final URL",
+      "connection_refused": "Connection refused: {{error}}",
+      "connection_timed_out": "Connection timed out",
+      "failed_to_create": "Failed to create event",
+      "failed_to_update": "Failed to update event",
+      "failed_to_delete": "Failed to delete event",
+      "ics_import_failed": "Failed to import ICS: {{error}}",
+      "ics_export_failed": "Failed to export ICS",
+      "text_required": "Text is required",
+      "no_llm": "No LLM endpoint configured",
+      "llm_failed": "LLM call failed: {{error}}",
+      "could_not_extract_json": "Could not extract JSON",
+      "invalid_json": "Invalid JSON: {{error}}",
+      "no_start_time": "Model did not produce a start time"
+    }
+  }
+}

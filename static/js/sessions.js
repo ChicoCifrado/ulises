@@ -1,6 +1,7 @@
 // Session Management Functions
 // This module handles all session-related operations
 
+import { t } from './i18n.js';
 import Storage from './storage.js';
 import uiModule, { styledPrompt } from './ui.js';
 import markdownModule from './markdown.js';
@@ -9,8 +10,7 @@ import { providerLogo } from './providers.js';
 import { initModelPicker, updateModelPicker } from './modelPicker.js';
 import themeModule from './theme.js';
 import spinnerModule from './spinner.js';
-
-const API_BASE = window.location.origin;
+import { API_BASE } from './apiBase.js';
 
 let sessions = [];
 let currentSessionId = null;
@@ -332,7 +332,7 @@ function createSessionItem(s) {
       fd.append('important', false);
       await fetch(`${API_BASE}/api/session/${s.id}/important`, { method: 'POST', body: fd });
       s.is_important = false;
-      uiModule.showToast('Unfavorited');
+      uiModule.showToast(t('session.unfavorited'));
       renderSessionList();
     });
   }
@@ -370,7 +370,7 @@ function createSessionItem(s) {
           fd.append('name', newName);
           await fetch(`${API_BASE}/api/session/${s.id}`, { method: 'PATCH', body: fd });
           s.name = newName;
-          uiModule.showToast('Renamed');
+          uiModule.showToast(t('session.renamed'));
         }
         _forceSidebarOpen();
         renderSessionList();
@@ -505,7 +505,7 @@ function createSessionItem(s) {
       const res = await fetch(`${API_BASE}/api/history/${s.id}`);
       const data = await res.json();
       const msgs = data.history || [];
-      if (!msgs.length) { uiModule.showToast('No messages to copy'); return; }
+      if (!msgs.length) { uiModule.showToast(t('session.no_messages_to_copy')); return; }
       const lines = msgs
         .filter(m => m.role === 'user' || m.role === 'assistant')
         .map(m => {
@@ -526,10 +526,10 @@ function createSessionItem(s) {
         document.execCommand('copy');
         ta.remove();
       }
-      uiModule.showToast('Chat copied to clipboard');
+      uiModule.showToast(t('common.copied'));
     } catch (e) {
       console.error('Copy chat failed:', e);
-      uiModule.showError('Failed to copy chat');
+      uiModule.showError(t('common.copy_failed'));
     }
   });
 
@@ -632,7 +632,7 @@ function createSessionItem(s) {
         fd.append('name', newName);
         await fetch(`${API_BASE}/api/session/${s.id}`, { method: 'PATCH', body: fd });
         s.name = newName;
-        uiModule.showToast('Renamed');
+        uiModule.showToast(t('session.renamed'));
       }
       _forceSidebarOpen();
       renderSessionList();
@@ -647,7 +647,7 @@ function createSessionItem(s) {
 
   deleteItem.addEventListener('click', async () => {
     if (s.is_important) {
-      uiModule.showToast('Unfavorite before deleting');
+      uiModule.showToast(t('session.unfavorite_before_delete'));
       dropdown.style.display = 'none';
       return;
     }
@@ -697,13 +697,13 @@ function createSessionItem(s) {
         _forceSidebarOpen();
         await loadSessions();
         dropdown.style.display = 'none';
-        uiModule.showToast('Session archived');
+        uiModule.showToast(t('session.archived'));
       } else {
         throw new Error('Failed to archive session');
       }
     } catch (error) {
       console.error('Error archiving session:', error);
-      uiModule.showError('Failed to archive session');
+      uiModule.showError(t('session.archive_failed'));
     }
   });
 
@@ -1302,7 +1302,7 @@ function _initBulkSelect() {
       _exitSelectMode();
       if (window._suppressSidebarClose !== undefined) { window._suppressSidebarClose = true; setTimeout(() => { window._suppressSidebarClose = false; }, 1500); }
       await loadSessions();
-      uiModule.showToast(`${count} session(s) archived`);
+      uiModule.showToast(t('session.archived_format', { count }));
     });
   }
 
@@ -1323,7 +1323,7 @@ function _initBulkSelect() {
       _exitSelectMode();
       if (window._suppressSidebarClose !== undefined) { window._suppressSidebarClose = true; setTimeout(() => { window._suppressSidebarClose = false; }, 1500); }
       await loadSessions();
-      uiModule.showToast(`${deletedIds.length} session(s) deleted`);
+      uiModule.showToast(t('session.deleted_format', { count: deletedIds.length }));
     });
   }
 }
@@ -1938,12 +1938,13 @@ async function _onSessionListKeydown(e) {
   }
 
   if (e.key === 'Delete' || e.key === 'Backspace') {
+    if (item.querySelector('.session-rename-input')) return;
     e.preventDefault();
     const sid = item.dataset.sessionId;
     const s = sessions.find(x => x.id === sid);
     if (!s) return;
     if (s.is_important) {
-      uiModule.showToast('Unfavorite before deleting');
+      uiModule.showToast(t('session.unfavorite_before_delete'));
       return;
     }
     const ok = await uiModule.styledConfirm('Delete this session?', { confirmText: 'Delete', danger: true });
@@ -2084,6 +2085,17 @@ export function clearStreaming(sessionId) {
   _updateRailNotifs();
 }
 
+function _clearRunningState(sessionId) {
+  if (!sessionId) return;
+  var changed = false;
+  if (_researchingSessions.delete(sessionId)) changed = true;
+  if (_streamingSessions.delete(sessionId)) changed = true;
+  if (changed) {
+    _updateResearchDots();
+    _updateRailNotifs();
+  }
+}
+
 export function markStreamComplete(sessionId) {
   _researchingSessions.delete(sessionId);
   _streamingSessions.delete(sessionId);
@@ -2154,9 +2166,15 @@ async function _checkServerStream(sessionId) {
     if (window.chatModule && window.chatModule.hasActiveStream && window.chatModule.hasActiveStream(sessionId)) return;
 
     const res = await fetch(`${API_BASE}/api/chat/stream_status/${sessionId}`);
-    if (!res.ok) return; // 404 = no active stream
+    if (!res.ok) {
+      _clearRunningState(sessionId);
+      return; // 404 = no active stream
+    }
     const info = await res.json();
-    if (info.status !== 'streaming') return;
+    if (info.status !== 'streaming') {
+      _clearRunningState(sessionId);
+      return;
+    }
 
     // Skip if this is a research stream — research has its own progress UI
     if (info.mode === 'research' || info.is_research) return;
@@ -2404,9 +2422,9 @@ async function _arcRestore(sid) {
     if (!res.ok) throw new Error('Failed');
     _arcRemove(sid);
     _arcRefreshUI();
-    uiModule.showToast('Session restored');
+    uiModule.showToast(t('session.restored'));
     loadSessions();
-  } catch { uiModule.showError('Failed to restore session'); }
+  } catch { uiModule.showError(t('session.restore_failed')); }
 }
 
 async function _arcDelete(sid) {
@@ -2417,8 +2435,8 @@ async function _arcDelete(sid) {
     await _animateSessionRowsRemoving([sid], '#archive-grid .archive-row[data-session-id]');
     _arcRemove(sid);
     _arcRefreshUI();
-    uiModule.showToast('Session deleted');
-  } catch { uiModule.showError('Failed to delete session'); }
+    uiModule.showToast(t('session.deleted'));
+  } catch { uiModule.showError(t('session.delete_failed')); }
 }
 
 function _arcRemove(sid) {
@@ -2438,7 +2456,7 @@ async function _arcBulkRestore() {
   }
   _arc.selected.clear();
   _arcRefreshUI();
-  uiModule.showToast(`${ids.length} session${ids.length > 1 ? 's' : ''} restored`);
+  uiModule.showToast(t('session.restored_format', { count: ids.length }));
   loadSessions();
 }
 
@@ -2460,7 +2478,7 @@ async function _arcBulkDelete() {
   await _animateSessionRowsRemoving(deletedIds, '#archive-grid .archive-row[data-session-id]');
   _arc.selected.clear();
   _arcRefreshUI();
-  uiModule.showToast(`${deletedIds.length} session${deletedIds.length > 1 ? 's' : ''} deleted`);
+  uiModule.showToast(t('session.deleted_format', { count: deletedIds.length }));
 }
 
 function _arcToggleSelectMode() {
@@ -2741,10 +2759,10 @@ export function openLibrary(defaultTab) {
   document.getElementById('lib-bulk-action1').addEventListener('click', async () => {
     if (_lib.tab === 'chats') {
       for (const sid of _lib.selected) await fetch(`${API_BASE}/api/session/${sid}/archive`, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
-      uiModule.showToast(`Archived ${_lib.selected.size} sessions`);
+      uiModule.showToast(t('session.archived_format', { count: _lib.selected.size }));
     } else if (_lib.tab === 'archive') {
       for (const sid of _lib.selected) await fetch(`${API_BASE}/api/session/${sid}/restore`, { method: 'POST' });
-      uiModule.showToast(`Restored ${_lib.selected.size} sessions`);
+      uiModule.showToast(t('session.restored_format', { count: _lib.selected.size }));
     }
     _lib.selected.clear();
     _lib.selectMode = false;
@@ -2940,7 +2958,7 @@ async function _renderLibResearch(grid) {
               if (modal) modal.style.display = 'none';
               const msgInput = document.getElementById('message');
               if (msgInput) { msgInput.value = item.query; msgInput.focus(); }
-              uiModule.showToast('Toggle Research and send to re-run');
+              uiModule.showToast(t('session.toggle_research_and_rerun'));
             }},
             { label: 'Delete', danger: true, action: async () => {
               if (!await window.styledConfirm('Delete this research?', { confirmText: 'Delete', danger: true })) return;

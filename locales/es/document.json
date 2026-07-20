@@ -1,0 +1,18 @@
+{
+  "document": {
+    "create_failed": "Error al crear el documento: {error}",
+    "not_found": "Documento no encontrado",
+    "update_failed": "Error al actualizar el documento: {error}",
+    "upload_failed": "Error al subir: {error}",
+    "pdf_not_located": "No se pudo ubicar el PDF guardado",
+    "pdf_no_source": "El documento no es un PDF — no se encontró el marcador pdf_source",
+    "source_pdf_not_located": "No se pudo ubicar el PDF de origen",
+    "extraction_failed": "Error en la extracción: {error}",
+    "no_documents_specified": "No se especificaron documentos",
+    "no_documents_found": "No se encontraron documentos",
+    "all_already_reviewed": "Todos los documentos ya fueron revisados",
+    "auth_required": "Autenticación requerida",
+    "session_not_found": "Sesión no encontrada",
+    "pdf_viewer_unavailable": "Visor de PDF no disponible: {error}"
+  }
+}

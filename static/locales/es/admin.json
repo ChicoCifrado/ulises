@@ -1,0 +1,17 @@
+{
+  "admin": {
+    "setup_failed_setup": "Configuración fallida",
+    "endpoint_refreshed": "Estado del endpoint actualizado",
+    "no_offline": "No hay endpoints desconectados — nada que limpiar",
+    "removed_offline": "{{count}} endpoint{{s}} desconectado{{s}} eliminado{{s}}",
+    "errors": {
+      "not_authenticated": "No autenticado",
+      "internal_error": "Error interno",
+      "no_models_found": "No se encontraron modelos o el endpoint está desconectado",
+      "admin_only": "Solo administradores",
+      "workspace_admin_only": "La navegación del espacio de trabajo es solo para administradores",
+      "workspace_selection_admin": "La selección del espacio de trabajo es solo para administradores",
+      "feature_not_available": "Función no disponible"
+    }
+  }
+}

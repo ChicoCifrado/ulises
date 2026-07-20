@@ -26,7 +26,7 @@ async def test_read_upload_limited_rejects_oversized_upload():
         await read_upload_limited(_upload("too-big.bin", b"abcde"), 4, "Test upload")
 
     assert exc.value.status_code == 413
-    assert exc.value.detail == "Test upload exceeds 4 bytes limit"
+    assert exc.value.detail == "File size exceeds 4 bytes limit"
 
 
 def test_upload_limit_formatting_is_human_readable():
@@ -40,11 +40,11 @@ def test_direct_upload_routes_use_bounded_reads():
         "routes/stt_routes.py": [
             "read_upload_limited(file, STT_MAX_AUDIO_BYTES",
         ],
-        "routes/gallery_routes.py": [
+        "routes/gallery/gallery_routes.py": [
             "read_upload_limited(file, GALLERY_UPLOAD_MAX_BYTES",
             "read_upload_limited(file, GALLERY_TRANSFORM_UPLOAD_MAX_BYTES",
         ],
-        "routes/memory_routes.py": [
+        "routes/memory/memory_routes.py": [
             "read_upload_limited(file, MEMORY_IMPORT_MAX_BYTES",
         ],
         "routes/calendar_routes.py": [

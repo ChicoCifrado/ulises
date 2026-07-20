@@ -19,6 +19,7 @@ from src.prompt_security import untrusted_context_message
 from routes.prefs_routes import _load_for_user as load_prefs_for_user
 
 from fastapi import HTTPException
+from core.translations import t
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +80,7 @@ class PresetInfo:
 class PreprocessedMessage:
     """Result of chat_handler.preprocess_message."""
     enhanced_message: str
-    user_content: Any  # str or list (multimodal)
+    user_content: str | list  # str or list (multimodal)
     text_for_context: str
     youtube_transcripts: list
     attachment_meta: list
@@ -135,13 +136,13 @@ def _enforce_chat_privileges(request, sess) -> None:
     # (block all) from "user clicked [All]" (no restriction), since both
     # otherwise produce an empty `allowed_models` list.
     if privs.get("block_all_models"):
-        raise HTTPException(403, f"Your account is not allowed to use model '{sess.model}'.")
+        raise HTTPException(403, t("chat_helpers.model_not_allowed").format(model=sess.model))
 
     allowed_raw = privs.get("allowed_models")
     allowed = allowed_raw if isinstance(allowed_raw, list) else []
     restricted = bool(privs.get("allowed_models_restricted")) or bool(allowed)
     if restricted and sess.model and sess.model not in allowed:
-        raise HTTPException(403, f"Your account is not allowed to use model '{sess.model}'.")
+        raise HTTPException(403, t("chat_helpers.model_not_allowed").format(model=sess.model))
 
     cap = int(privs.get("max_messages_per_day") or 0)
     if cap <= 0:
@@ -162,7 +163,7 @@ def _enforce_chat_privileges(request, sess) -> None:
     finally:
         db.close()
     if count >= cap:
-        raise HTTPException(429, f"Daily message limit reached ({cap}). Try again in 24 hours.")
+        raise HTTPException(429, t("chat_helpers.daily_limit_reached").format(cap=cap))
 
 
 def needs_auto_name(name: str) -> bool:

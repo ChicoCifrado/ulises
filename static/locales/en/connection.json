@@ -1,0 +1,6 @@
+{
+  "connection": {
+    "successful": "Connection successful",
+    "failed": "Connection failed: {{error}}"
+  }
+}

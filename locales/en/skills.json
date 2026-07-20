@@ -1,0 +1,24 @@
+{
+  "skills": {
+    "generic_skill": "Skill is tagged generic",
+    "generic_or_unnecessary": "Generic or unnecessary skill",
+    "audit_flagged": "Audit flagged the skill as generic or unnecessary",
+    "no_skills_to_audit": "No skills to audit.",
+    "not_found": "Skill not found",
+    "no_builtin_tool": "No built-in tool named {name}",
+    "text_required": "text is required",
+    "could_not_download": "Could not download skill from URL",
+    "import_failed": "Skill import failed",
+    "slash_unavailable": "Skill is not available for slash invocation",
+    "source_unavailable": "Skill source unavailable",
+    "source_unavailable_legacy": "Skill source unavailable (legacy entry?)",
+    "no_model_configured": "No model configured — set a Default or Utility model in Settings.",
+    "markdown_required": "markdown is required",
+    "could_not_parse_skill_md": "Could not parse SKILL.md: {e}",
+    "update_failed": "Update failed",
+    "query_required": "query is required",
+    "audit_nightly_log": "Nightly audit of {count} least-recently-checked skill(s) with {model}",
+    "audit_all_log": "Auditing {count} skill(s) with {model}",
+    "tidy_reason": "Nothing to tidy"
+  }
+}

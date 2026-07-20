@@ -1,0 +1,30 @@
+{
+  "llm": {
+    "access_denied": "{provider} denegó el acceso (403)",
+    "all_fallbacks_failed": "Todos los fallbacks del LLM fallaron",
+    "auth_check_endpoint": ". Revisa Endpoints de Modelo → {provider} y vuelve a pegar la key.",
+    "auth_detail_suffix": " — {detail}",
+    "auth_rejected": "{provider} rechazó la API key",
+    "cannot_reach": "No se puede alcanzar {host}",
+    "cannot_reach_with_reason": "No se puede alcanzar {host}: {error}",
+    "chatgpt_credentials_expired": "Credenciales de ChatGPT expiradas",
+    "chatgpt_rate_limit": "Límite de velocidad de ChatGPT alcanzado",
+    "chatgpt_request_failed": "Solicitud a ChatGPT fallida",
+    "detail_colon": ": {detail}",
+    "detail_paren": " ({detail})",
+    "host_unreachable": "Upstream {host} inalcanzable (cooldown activo)",
+    "http_status_detail": "{provider} devolvió HTTP {status}",
+    "network_error": "Error de red",
+    "no_endpoint": "No hay endpoint LLM configurado",
+    "not_found_404": "{provider} devolvió 404 — revisa la URL base y el nombre del modelo.",
+    "outage": "{provider} está caído (HTTP {status}).",
+    "post_failed": "Error POST a {url}: {error}",
+    "post_failed_after_retries": "POST {url} falló tras {retries} intentos: {error}",
+    "primary_model_failed": "El modelo principal '{model}' falló",
+    "rate_limited_upstream": "{provider} limitó la velocidad (429).",
+    "read_timeout": "Tiempo de espera de lectura agotado",
+    "unexpected_schema": "Esquema inesperado de {url}: {data}",
+    "upstream_error": "Error upstream {url} -> {status}: {text}",
+    "upstream_error_stream": "HTTP {status}: {text}"
+  }
+}

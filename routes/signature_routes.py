@@ -16,6 +16,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from core.database import SessionLocal, Signature
+from core.translations import t
 from src.auth_helpers import get_current_user
 
 logger = logging.getLogger(__name__)
@@ -35,21 +36,21 @@ def _normalize_signature_png(raw: str) -> str:
     if m:
         b64 = m.group("data")
     elif _ANY_IMAGE_DATA_URL_RE.match(raw):
-        raise HTTPException(400, "Signature data must be a PNG image")
+        raise HTTPException(400, detail=t("signature.must_be_png"))
     else:
         b64 = raw
     if len(b64) > _MAX_SIGNATURE_B64:
-        raise HTTPException(400, "Signature PNG is too large")
+        raise HTTPException(400, detail=t("signature.png_too_large"))
     try:
         payload = base64.b64decode(b64, validate=True)
     except Exception:
-        raise HTTPException(400, "Signature data must be base64-encoded PNG bytes")
+        raise HTTPException(400, detail=t("signature.must_be_base64_png"))
     if not payload:
-        raise HTTPException(400, "Signature PNG is empty")
+        raise HTTPException(400, detail=t("signature.png_empty"))
     if len(payload) > _MAX_SIGNATURE_BYTES:
-        raise HTTPException(400, "Signature PNG is too large")
+        raise HTTPException(400, detail=t("signature.png_too_large"))
     if not payload.startswith(_PNG_MAGIC):
-        raise HTTPException(400, "Signature data must be a PNG image")
+        raise HTTPException(400, detail=t("signature.must_be_png"))
     return base64.b64encode(payload).decode("ascii")
 
 
@@ -57,7 +58,7 @@ def _signature_dimension(value: Optional[int]) -> Optional[int]:
     if value is None:
         return None
     if not isinstance(value, int) or value < 1 or value > _MAX_SIGNATURE_DIMENSION:
-        raise HTTPException(400, "Signature dimensions are invalid")
+        raise HTTPException(400, detail=t("signature.dimensions_invalid"))
     return value
 
 
@@ -123,7 +124,7 @@ def setup_signature_routes() -> APIRouter:
         except Exception as e:
             db.rollback()
             logger.error(f"Failed to save signature: {e}")
-            raise HTTPException(500, f"Failed to save signature: {e}")
+            raise HTTPException(500, detail=t("signature.create_failed").format(error=str(e)))
         finally:
             db.close()
 
@@ -134,9 +135,9 @@ def setup_signature_routes() -> APIRouter:
         try:
             sig = db.query(Signature).filter(Signature.id == sig_id).first()
             if not sig:
-                raise HTTPException(404, "Signature not found")
+                raise HTTPException(404, detail=t("signature.not_found"))
             if user and sig.owner != user:
-                raise HTTPException(403, "Not your signature")
+                raise HTTPException(403, detail=t("signature.not_yours"))
             db.delete(sig)
             db.commit()
             return {"deleted": sig_id}
@@ -144,7 +145,7 @@ def setup_signature_routes() -> APIRouter:
             raise
         except Exception as e:
             db.rollback()
-            raise HTTPException(500, f"Failed to delete signature: {e}")
+            raise HTTPException(500, detail=t("signature.delete_failed").format(error=str(e)))
         finally:
             db.close()
 

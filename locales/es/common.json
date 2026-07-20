@@ -1,0 +1,9 @@
+{
+  "common": {
+    "errors": {
+      "timeout": "La solicitud excedió el tiempo de espera de {seconds}s",
+      "too_many_requests": "Demasiadas solicitudes"
+    },
+    "not_found": "No encontrado"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "companion": {
+    "pair_title": "Emparejar un dispositivo",
+    "pair_desc": "Genera un código de emparejamiento de un solo uso (un token de API con alcance de chat) para un cliente LAN.",
+    "generate_code": "Generar código de emparejamiento",
+    "admin_note": "Solo administradores. Cada código genera un nuevo token, que se muestra una vez. Adminístralo o revócalo en Ajustes → API tokens.",
+    "pairing_code": "Código de emparejamiento",
+    "host": "Host:",
+    "port": "Puerto:",
+    "token": "Token:",
+    "payload": "Payload:",
+    "shown_once": "Se muestra una vez. Esto otorga acceso de chat a tu Ulises; revócalo en Ajustes → API tokens (id ...). El dispositivo debe estar en la misma red, y el servidor debe enlazarse a tu LAN.",
+    "qr_unavailable": "Renderizado de QR no disponible — ingresa los detalles manualmente."
+  }
+}

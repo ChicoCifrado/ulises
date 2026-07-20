@@ -1,0 +1,9 @@
+{
+  "email": {
+    "errors": {
+      "integration_unavailable": "La integración de correo no está disponible",
+      "invalid_draft": "Payload de borrador inválido: {{error}}",
+      "invalid_send": "Payload de envío inválido: {{error}}"
+    }
+  }
+}

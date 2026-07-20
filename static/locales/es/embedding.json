@@ -1,0 +1,14 @@
+{
+  "embedding": {
+    "fastembed_not_installed": "fastembed no está instalado",
+    "unknown_model": "Modelo desconocido: {{name}}",
+    "download_failed": "Descarga fallida: {{error}}",
+    "cannot_delete_active": "No se puede eliminar el modelo de embedding activo",
+    "currently_downloading": "El modelo se está descargando actualmente",
+    "no_cache_source": "No hay fuente de caché para este modelo",
+    "not_cached": "Modelo no almacenado en caché",
+    "url_required": "La URL es obligatoria",
+    "rejected_url": "URL de endpoint rechazada: {{reason}}",
+    "unreachable": "Endpoint inaccesible: {{error}}"
+  }
+}

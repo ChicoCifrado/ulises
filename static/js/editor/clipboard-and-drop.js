@@ -26,6 +26,7 @@
  *   uiModule:             object,
  * }} deps
  */
+import { t } from '../i18n.js';
 import { state } from './state.js';
 
 export function wireClipboardAndDrop({
@@ -48,7 +49,7 @@ export function wireClipboardAndDrop({
       if (tb) tb.querySelectorAll('.ge-tool-btn').forEach(b => b.classList.toggle('active', b.dataset.tool === 'move'));
       renderLayerPanel();
       composite();
-      uiModule.showToast('Pasted as new layer');
+      uiModule.showToast(t('editor.pasted_as_new_layer'));
     }
 
     // Check internal clipboard first (from Ctrl+C lasso/wand).

@@ -1,0 +1,19 @@
+{
+  "research": {
+    "not_authenticated": "No autenticado",
+    "invalid_session_id": "Formato de ID de sesión inválido",
+    "no_research": "No se encontraron investigaciones para esta sesión",
+    "no_result": "No hay resultados de investigación disponibles",
+    "not_found": "Investigación no encontrada",
+    "report_failed": "Error al generar el informe: {error}",
+    "no_report": "No hay informe visual disponible para esta sesión",
+    "read_failed": "Error al leer la investigación: {error}",
+    "update_failed": "Error al actualizar la investigación: {error}",
+    "not_allowed": "Tu cuenta no tiene permiso para usar la investigación.",
+    "endpoint_not_found": "Endpoint no encontrado o deshabilitado",
+    "endpoint_no_model": "El endpoint no está configurado con un modelo utilizable.",
+    "no_endpoints": "No hay endpoints configurados. Agrega uno en Configuración primero.",
+    "no_endpoint_configured": "No hay endpoint configurado — agrega uno en Configuración primero",
+    "session_manager_not_configured": "Gestor de sesiones no configurado"
+  }
+}

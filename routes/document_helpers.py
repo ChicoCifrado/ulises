@@ -8,6 +8,7 @@ import re
 from typing import Any, Dict, Optional
 
 from fastapi import HTTPException, Request
+from core.translations import t
 from pydantic import BaseModel
 
 from core.database import Document, DocumentVersion
@@ -78,17 +79,17 @@ def _verify_doc_owner(db, doc: Document, user: str):
     the session join for any not-yet-backfilled legacy row.
     """
     if user is None:
-        raise HTTPException(403, "Authentication required")
+        raise HTTPException(403, t("auth.not_authenticated"))
     if doc.owner is not None:
         if doc.owner != user:
-            raise HTTPException(404, "Document not found")
+            raise HTTPException(404, t("document_helpers.not_found"))
         return
     # Legacy fallback: derive ownership from the linked session.
     if not doc.session_id:
-        raise HTTPException(404, "Document not found")
+        raise HTTPException(404, t("document_helpers.not_found"))
     session = db.query(DbSession).filter(DbSession.id == doc.session_id).first()
     if not session or session.owner != user:
-        raise HTTPException(404, "Document not found")
+        raise HTTPException(404, t("document_helpers.not_found"))
 
 
 def _owner_session_filter(q, user):

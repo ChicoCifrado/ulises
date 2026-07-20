@@ -1,0 +1,15 @@
+{
+  "companion": {
+    "admin_note": "Solo administradores. Cada código genera un nuevo token, que se muestra una sola vez.",
+    "host": "Host:",
+    "pair_button": "Emparejar",
+    "pair_description": "Genera un código de emparejamiento de un solo uso para vincular un dispositivo",
+    "pair_title": "Emparejar un dispositivo",
+    "pairing_code": "Código QR de emparejamiento",
+    "pairing_qr_unavailable": "Código QR no disponible",
+    "pairing_warning": "Se muestra una vez. Esto concede acceso de chat a tu Ulises; revócalo en Configuración &rarr; Tokens API (id {token_id}). El dispositivo debe estar en la misma red y el servidor debe enlazarse a tu LAN.",
+    "payload": "Carga útil:",
+    "port": "Puerto:",
+    "token": "Token:"
+  }
+}

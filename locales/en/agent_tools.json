@@ -1,0 +1,16 @@
+{
+  "agent_tools": {
+    "bash_timed_out": "bash: timed out after {timeout}s — process killed",
+    "python_timed_out": "python: timed out after {timeout}s — process killed",
+    "session_manager_unavailable": "Session manager not available",
+    "session_format": "Need 2 lines: session name, then model spec",
+    "session_name_empty": "Session name cannot be empty",
+    "session_create_failed": "Failed to create session: {error}",
+    "session_send_format": "Need 2 lines: session_id, then message",
+    "session_not_found": "Session '{id}' not found",
+    "session_no_message": "No message provided",
+    "session_send_failed": "Failed to send to session: {error}",
+    "missing_action": "Missing action (rename|archive|delete|important|truncate|fork|list|switch)",
+    "need_session_id": "Need a session_id (or 'current' for the active chat)"
+  }
+}

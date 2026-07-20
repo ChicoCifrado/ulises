@@ -4,6 +4,8 @@ import os
 from typing import Optional
 from fastapi import Request, HTTPException
 
+from core.translations import t
+
 
 def get_current_user(request: Request) -> Optional[str]:
     """Get current username from request state (set by auth middleware)."""
@@ -79,7 +81,7 @@ def require_user(request: Request) -> str:
     open them up.
     """
     if _is_api_token_request(request):
-        raise HTTPException(403, "API tokens must use a scope-aware API route")
+        raise HTTPException(403, t("auth.api_token_route_required"))
 
     u = get_current_user(request)
     if u:
@@ -102,11 +104,11 @@ def require_user(request: Request) -> str:
     if is_loopback and os.getenv("LOCALHOST_BYPASS", "false").lower() == "true":
         return ""
     if auth_mgr is not None and getattr(auth_mgr, "is_configured", False):
-        raise HTTPException(401, "Not authenticated")
+        raise HTTPException(401, t("auth.not_authenticated"))
     # Unconfigured / first-run mode: only allow loopback callers.
     if is_loopback:
         return ""
-    raise HTTPException(401, "Not authenticated")
+    raise HTTPException(401, t("auth.not_authenticated"))
 
 
 def require_privilege(request: Request, key: str) -> str:
@@ -133,7 +135,7 @@ def require_privilege(request: Request, key: str) -> str:
     # True = permitted; missing key defaults to permitted (unknown privileges
     # fail open — the UI gates display-side).
     if not privs.get(key, True):
-        raise HTTPException(403, f"Your account is not allowed to {key.replace('_', ' ')}.")
+        raise HTTPException(403, t("auth.privilege_denied").format(action=key.replace("_", " ")))
     return user
 
 

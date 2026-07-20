@@ -1,0 +1,17 @@
+{
+  "message": {
+    "required": "Message is required",
+    "cannot_be_empty": "Message cannot be empty",
+    "exceeds_max_length": "Message exceeds maximum length",
+    "no_file_or_invalid": "No file uploaded or invalid filename",
+    "file_empty": "File is empty",
+    "file_too_large": "File size exceeds {limit} limit",
+    "file_read_error": "Error reading uploaded file",
+    "unsupported_file_type": "File type '{ext}' not allowed",
+    "missing_parameters": "Missing 'message' and/or 'session' in request",
+    "session_id_required": "Session ID is required",
+    "session_not_found": "Session '{session_id}' not found",
+    "invalid_json_body": "Invalid JSON in request body",
+    "request_processing_error": "Error processing request"
+  }
+}

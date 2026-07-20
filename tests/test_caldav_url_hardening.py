@@ -174,4 +174,3 @@ def test_calendar_routes_use_hardened_caldav_client_and_secret_storage():
     assert "encrypt(body[\"password\"])" in text
     assert "pw = decrypt(pw)" in text
     assert "follow_redirects=False, trust_env=False" in text
-    assert "Redirects are not followed for CalDAV safety" in text

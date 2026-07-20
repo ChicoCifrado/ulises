@@ -1,0 +1,8 @@
+{
+  "voice": {
+    "stt_unavailable": "El servicio STT no está disponible o está configurado en modo navegador",
+    "empty_audio": "Archivo de audio vacío",
+    "transcription_failed": "Transcripción fallida",
+    "tts_cache_cleared": "Caché limpiada"
+  }
+}

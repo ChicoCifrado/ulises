@@ -276,6 +276,7 @@ class GalleryImage(TimestampMixin, Base):
     id         = Column(String, primary_key=True, index=True)
     filename   = Column(String, nullable=False, unique=True)
     prompt     = Column(Text, nullable=False, default="")
+    caption    = Column(Text, nullable=True, default="")
     model      = Column(String, nullable=True)
     size       = Column(String, nullable=True)
     quality    = Column(String, nullable=True)
@@ -1182,6 +1183,29 @@ def _migrate_add_multiuser_owner_columns():
     _migrate_add_owner_to_table("documents", "ix_documents_owner")
 
 
+def _migrate_add_gallery_caption_column():
+    """Add OCR/vision caption storage for gallery images."""
+    import sqlite3
+    db_path = DATABASE_URL.replace("sqlite:///", "")
+    if not os.path.exists(db_path):
+        return
+    conn = None
+    try:
+        conn = sqlite3.connect(db_path)
+        columns = [row[1] for row in conn.execute("PRAGMA table_info(gallery_images)").fetchall()]
+        if columns and "caption" not in columns:
+            conn.execute("ALTER TABLE gallery_images ADD COLUMN caption TEXT DEFAULT ''")
+            conn.commit()
+            logging.getLogger(__name__).info("Migrated: added caption column to gallery_images")
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"Migration gallery caption column failed: {e}")
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
 def _migrate_add_api_token_scopes_column():
     """Add API token scopes for existing installs.
 
@@ -1408,46 +1432,53 @@ def _migrate_add_task_automation_columns():
             )
             if needs_rebuild:
                 logging.getLogger(__name__).info("Rebuilding scheduled_tasks to make prompt/schedule/scheduled_time nullable")
-                conn.execute(text("ALTER TABLE scheduled_tasks RENAME TO _old_scheduled_tasks"))
-                conn.execute(text("""
-                    CREATE TABLE scheduled_tasks (
-                        id VARCHAR PRIMARY KEY,
-                        owner VARCHAR,
-                        name VARCHAR NOT NULL,
-                        prompt TEXT,
-                        schedule VARCHAR,
-                        scheduled_time VARCHAR,
-                        scheduled_day INTEGER,
-                        scheduled_date DATETIME,
-                        next_run DATETIME,
-                        last_run DATETIME,
-                        status VARCHAR,
-                        output_target VARCHAR,
-                        session_id VARCHAR,
-                        model VARCHAR,
-                        endpoint_url VARCHAR,
-                        run_count INTEGER,
-                        created_at DATETIME NOT NULL,
-                        updated_at DATETIME NOT NULL,
-                        task_type VARCHAR DEFAULT 'llm',
-                        action VARCHAR,
-                        trigger_type VARCHAR DEFAULT 'schedule',
-                        trigger_event VARCHAR,
-                        trigger_count INTEGER,
-                        trigger_counter INTEGER DEFAULT 0
-                    )
-                """))
-                conn.execute(text("""
-                    INSERT INTO scheduled_tasks
-                    SELECT id, owner, name, prompt, schedule, scheduled_time,
-                           scheduled_day, scheduled_date, next_run, last_run,
-                           status, output_target, session_id, model, endpoint_url,
-                           run_count, created_at, updated_at,
-                           task_type, action, trigger_type, trigger_event,
-                           trigger_count, trigger_counter
-                    FROM _old_scheduled_tasks
-                """))
-                conn.execute(text("DROP TABLE _old_scheduled_tasks"))
+                # Disable FK enforcement temporarily — the table rename + drop
+                # would otherwise fail because task_runs.task_id FK references
+                # scheduled_tasks.id. Re-enable after the swap.
+                conn.execute(text("PRAGMA foreign_keys=OFF"))
+                try:
+                    conn.execute(text("ALTER TABLE scheduled_tasks RENAME TO _old_scheduled_tasks"))
+                    conn.execute(text("""
+                        CREATE TABLE scheduled_tasks (
+                            id VARCHAR PRIMARY KEY,
+                            owner VARCHAR,
+                            name VARCHAR NOT NULL,
+                            prompt TEXT,
+                            schedule VARCHAR,
+                            scheduled_time VARCHAR,
+                            scheduled_day INTEGER,
+                            scheduled_date DATETIME,
+                            next_run DATETIME,
+                            last_run DATETIME,
+                            status VARCHAR,
+                            output_target VARCHAR,
+                            session_id VARCHAR,
+                            model VARCHAR,
+                            endpoint_url VARCHAR,
+                            run_count INTEGER,
+                            created_at DATETIME NOT NULL,
+                            updated_at DATETIME NOT NULL,
+                            task_type VARCHAR DEFAULT 'llm',
+                            action VARCHAR,
+                            trigger_type VARCHAR DEFAULT 'schedule',
+                            trigger_event VARCHAR,
+                            trigger_count INTEGER,
+                            trigger_counter INTEGER DEFAULT 0
+                        )
+                    """))
+                    conn.execute(text("""
+                        INSERT INTO scheduled_tasks
+                        SELECT id, owner, name, prompt, schedule, scheduled_time,
+                               scheduled_day, scheduled_date, next_run, last_run,
+                               status, output_target, session_id, model, endpoint_url,
+                               run_count, created_at, updated_at,
+                               task_type, action, trigger_type, trigger_event,
+                               trigger_count, trigger_counter
+                        FROM _old_scheduled_tasks
+                    """))
+                    conn.execute(text("DROP TABLE _old_scheduled_tasks"))
+                finally:
+                    conn.execute(text("PRAGMA foreign_keys=ON"))
 
             conn.commit()
             logging.getLogger(__name__).info("Task automation columns migration complete")
@@ -1811,6 +1842,7 @@ def init_db():
     _migrate_add_token_columns()
     _migrate_add_mode_column()
     _migrate_add_multiuser_owner_columns()
+    _migrate_add_gallery_caption_column()
     _migrate_add_api_token_scopes_column()
     _migrate_backfill_document_owner_from_session()
     _migrate_assign_legacy_owner()

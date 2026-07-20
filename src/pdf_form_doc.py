@@ -303,7 +303,7 @@ def _checkbox_marker(value: Any) -> str:
     return "[x]" if value else "[ ]"
 
 
-def _flatten(value: Any) -> str:
+def _flatten(value: str | None) -> str:
     """Collapse PDF newline runs (\\r, \\n) so a value fits on one bullet line."""
     if value is None:
         return ""

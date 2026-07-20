@@ -41,6 +41,8 @@
  * }} deps
  */
 import { state } from './state.js';
+import { API_BASE } from '../apiBase.js';
+import { t } from '../i18n.js';
 
 export function wireInpaintButtons({
   buildMergedMaskCanvas, dilateMask, applyInpaintFeather,
@@ -53,12 +55,12 @@ export function wireInpaintButtons({
     // Pre-check: build the union mask the AI will receive and verify
     // at least one pixel is painted.
     const preMerged = buildMergedMaskCanvas();
-    if (!preMerged) { if (uiModule) uiModule.showToast('Draw the area you want to inpaint first'); return; }
+    if (!preMerged) { if (uiModule) uiModule.showToast(t('editor.inpaint_draw_first')); return; }
     const pmCtx = preMerged.getContext('2d');
     const maskData = pmCtx.getImageData(0, 0, preMerged.width, preMerged.height).data;
     let hasMask = false;
     for (let i = 3; i < maskData.length; i += 4) { if (maskData[i] > 0) { hasMask = true; break; } }
-    if (!hasMask) { if (uiModule) uiModule.showToast('Draw the area you want to inpaint first'); return; }
+    if (!hasMask) { if (uiModule) uiModule.showToast(t('editor.inpaint_draw_first')); return; }
     const btn = document.getElementById(btnId);
     const btnLabel = labelId ? document.getElementById(labelId) : null;
     btn.disabled = true;
@@ -136,7 +138,7 @@ export function wireInpaintButtons({
       const dilatedMask = dilateMask(mergedMask, padPx);
       const imageB64 = flatCanvas.toDataURL('image/png').split(',')[1];
       const maskB64 = dilatedMask.toDataURL('image/png').split(',')[1];
-      const res = await fetch('/api/image/inpaint', {
+      const res = await fetch(`${API_BASE}/api/image/inpaint`, {
         method: 'POST', credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify((() => {
@@ -223,19 +225,19 @@ export function wireInpaintButtons({
             eSlider.value = '0';
           }
           if (eLabel) eLabel.textContent = '0px';
-          if (uiModule) uiModule.showToast('Inpaint complete — drag Edge feather / Edge stroke to blend', 5000);
+          if (uiModule) uiModule.showToast(t('editor.inpaint_complete'), 5000);
         } catch (renderErr) {
           console.error('[inpaint] render error', renderErr);
-          if (uiModule) uiModule.showToast('Inpaint render failed: ' + (renderErr.message || renderErr), 6000);
+          if (uiModule) uiModule.showToast(t('editor.inpaint_render_failed', { error: renderErr.message || renderErr }), 6000);
         }
       };
       resultImg.onerror = (e) => {
         console.error('[inpaint] base64 decode failed', e);
-        if (uiModule) uiModule.showToast('Inpaint result failed to decode', 6000);
+        if (uiModule) uiModule.showToast(t('editor.inpaint_decode_failed'), 6000);
       };
       resultImg.src = 'data:image/png;base64,' + data.image;
     } catch (e) {
-      if (uiModule) uiModule.showToast('Inpaint failed: ' + e.message, 6000);
+      if (uiModule) uiModule.showToast(t('editor.inpaint_failed', { message: e.message }), 6000);
     } finally {
       btn.disabled = false;
       if (btnLabel) btnLabel.textContent = idleLabel;
@@ -249,7 +251,7 @@ export function wireInpaintButtons({
   // Generate.
   document.getElementById('ge-inpaint-run').addEventListener('click', async () => {
     const prompt = document.getElementById('ge-inpaint-prompt')?.value?.trim();
-    if (!prompt) { if (uiModule) uiModule.showToast('Enter a prompt for inpainting'); return; }
+    if (!prompt) { if (uiModule) uiModule.showToast(t('editor.inpaint_enter_prompt')); return; }
     const strength = (parseInt(document.getElementById('ge-strength-slider')?.value || '75')) / 100;
     await runInpaint({
       prompt, strength,
@@ -323,7 +325,7 @@ export function wireInpaintButtons({
       }
     }
     if (emptyCount === 0) {
-      if (uiModule) uiModule.showToast('No empty areas to outpaint — canvas is fully covered.');
+      if (uiModule) uiModule.showToast(t('editor.inpaint_no_empty'));
       return;
     }
     mrCtx.putImageData(mrImg, 0, 0);
@@ -348,7 +350,7 @@ export function wireInpaintButtons({
     // 4) Temporarily replace the active mask sub-layer with the
     //    outpaint mask. Snapshot the previous so we can restore.
     const mask = ensureActiveMaskLayer();
-    if (!mask) { if (uiModule) uiModule.showToast('No active layer for outpaint'); return; }
+    if (!mask) { if (uiModule) uiModule.showToast(t('editor.inpaint_no_layer')); return; }
     const savedMask = mask.ctx.getImageData(0, 0, mask.canvas.width, mask.canvas.height);
     mask.ctx.clearRect(0, 0, mask.canvas.width, mask.canvas.height);
     mask.ctx.drawImage(expanded, 0, 0);

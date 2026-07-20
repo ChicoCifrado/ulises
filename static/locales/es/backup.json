@@ -1,0 +1,8 @@
+{
+  "backup": {
+    "invalid_json": "JSON inválido",
+    "expected_object": "Se esperaba un objeto JSON",
+    "no_data_found": "No se encontraron datos reconocidos en el archivo",
+    "imported": "Importado: {{items}}"
+  }
+}

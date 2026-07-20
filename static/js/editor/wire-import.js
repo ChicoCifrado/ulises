@@ -26,6 +26,7 @@
  * @returns {{ handleImportedImage: (img: HTMLImageElement) => void }}
  */
 import { state } from './state.js';
+import { t } from '../i18n.js';
 
 export function wireImport({ container, saveState, createLayer, composite, renderLayerPanel, uiModule }) {
   // Hidden <input type="file"> the topbar + File buttons both click.
@@ -63,7 +64,7 @@ export function wireImport({ container, saveState, createLayer, composite, rende
     if (importSec) importSec.style.display = 'none';
     composite();
     renderLayerPanel();
-    if (uiModule) uiModule.showToast('Image imported — drag to position');
+    if (uiModule) uiModule.showToast(t('editor.import_done'));
   }
 
   importFileInput.addEventListener('change', (e) => {
@@ -90,14 +91,14 @@ export function wireImport({ container, saveState, createLayer, composite, rende
         const imgType = item.types.find(t => t.startsWith('image/'));
         if (imgType) { blob = await item.getType(imgType); break; }
       }
-      if (!blob) { if (uiModule) uiModule.showToast('No image found in clipboard'); return; }
+      if (!blob) { if (uiModule) uiModule.showToast(t('editor.import_no_clipboard_image')); return; }
       const url = URL.createObjectURL(blob);
       const img = new Image();
       img.onload = () => { handleImportedImage(img); URL.revokeObjectURL(url); };
-      img.onerror = () => { URL.revokeObjectURL(url); if (uiModule) uiModule.showToast('Failed to load clipboard image'); };
+      img.onerror = () => { URL.revokeObjectURL(url); if (uiModule) uiModule.showToast(t('editor.import_clipboard_failed')); };
       img.src = url;
     } catch (e) {
-      if (uiModule) uiModule.showToast('Clipboard access denied or no image available');
+      if (uiModule) uiModule.showToast(t('editor.import_clipboard_denied'));
     }
   });
 
@@ -108,7 +109,7 @@ export function wireImport({ container, saveState, createLayer, composite, rende
       const res = await fetch('/api/gallery/library?limit=50', { credentials: 'same-origin' });
       const data = await res.json();
       const items = data.items || [];
-      if (!items.length) { if (uiModule) uiModule.showToast('No images in gallery'); return; }
+      if (!items.length) { if (uiModule) uiModule.showToast(t('editor.import_no_gallery')); return; }
 
       // Picker overlay.
       const overlay = document.createElement('div');
@@ -129,7 +130,7 @@ export function wireImport({ container, saveState, createLayer, composite, rende
           const img = new Image();
           img.crossOrigin = 'anonymous';
           img.onload = () => handleImportedImage(img);
-          img.onerror = () => { if (uiModule) uiModule.showToast('Failed to load gallery image'); };
+          img.onerror = () => { if (uiModule) uiModule.showToast(t('editor.import_gallery_failed')); };
           img.src = item.url;
         });
         grid.appendChild(thumb);
@@ -140,7 +141,7 @@ export function wireImport({ container, saveState, createLayer, composite, rende
       overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
       panel.querySelector('#ge-gallery-close').addEventListener('click', () => overlay.remove());
     } catch (e) {
-      if (uiModule) uiModule.showToast('Failed to load gallery: ' + e.message);
+      if (uiModule) uiModule.showToast(t('editor.import_gallery_error', { message: e.message }));
     }
   });
 

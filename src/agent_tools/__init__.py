@@ -8,7 +8,9 @@ Sub-modules:
   - tool_parsing.py: regex patterns, parse/strip functions
   - tool_schemas.py: FUNCTION_TOOL_SCHEMAS, function_call_to_tool_block
   - tool_execution.py: execute_tool_block, format_tool_result, MCP helpers
-  - tool_implementations.py: all do_* tool functions
+  - tool_implementations.py: do_* tool functions (search, skills, tasks, api)
+  - admin_tools.py: admin do_* tool functions (endpoints, mcp, webhooks, tokens, settings)
+  - document_tools.py: active document helpers
 """
 
 import logging
@@ -20,11 +22,7 @@ logger = logging.getLogger(__name__)
 
 from .subprocess_tools import BashTool, PythonTool
 from .web_tools import WebSearchTool, WebFetchTool
-from .filesystem_tools import ReadFileTool, WriteFileTool, EditFileTool, LsTool, GlobTool, GrepTool, GetWorkspaceTool
-from .document_tools import CreateDocumentTool, UpdateDocumentTool, EditDocumentTool, SuggestDocumentTool, ManageDocumentTool
-from .model_interaction_tools import ChatWithModelTool, AskTeacherTool, ListModelsTool
-from .bg_job_tools import ManageBgJobsTool
-from .session_tools import CreateSessionTool, ListSessionsTool, SendToSessionTool, ManageSessionTool
+from .filesystem_tools import ReadFileTool, WriteFileTool, EditFileTool, LsTool, GlobTool, GrepTool
 
 TOOL_HANDLERS = {
     "bash": BashTool().execute,
@@ -37,21 +35,30 @@ TOOL_HANDLERS = {
     "ls": LsTool().execute,
     "glob": GlobTool().execute,
     "grep": GrepTool().execute,
-    "create_document": CreateDocumentTool().execute,
-    "update_document": UpdateDocumentTool().execute,
-    "edit_document": EditDocumentTool().execute,
-    "suggest_document": SuggestDocumentTool().execute,
-    "manage_documents": ManageDocumentTool().execute,
-    "get_workspace": GetWorkspaceTool().execute,
-    "chat_with_model": ChatWithModelTool().execute,
-    "ask_teacher": AskTeacherTool().execute,
-    "list_models": ListModelsTool().execute,
-    "manage_bg_jobs": ManageBgJobsTool().execute,
-    "create_session": CreateSessionTool().execute,
-    "list_sessions": ListSessionsTool().execute,
-    "send_to_session": SendToSessionTool().execute,
-    "manage_session": ManageSessionTool().execute,
 }
+
+from .admin_tools import ADMIN_TOOL_HANDLERS
+TOOL_HANDLERS.update(ADMIN_TOOL_HANDLERS)
+
+from .document_tools import (
+    ManageDocumentTool, CreateDocumentTool, UpdateDocumentTool, EditDocumentTool, SuggestDocumentTool,
+)
+TOOL_HANDLERS["create_document"] = CreateDocumentTool().execute
+TOOL_HANDLERS["update_document"] = UpdateDocumentTool().execute
+TOOL_HANDLERS["edit_document"] = EditDocumentTool().execute
+TOOL_HANDLERS["suggest_document"] = SuggestDocumentTool().execute
+TOOL_HANDLERS["manage_documents"] = ManageDocumentTool().execute
+
+from .model_interaction_tools import ChatWithModelTool, AskTeacherTool, ListModelsTool
+TOOL_HANDLERS["chat_with_model"] = ChatWithModelTool().execute
+TOOL_HANDLERS["ask_teacher"] = AskTeacherTool().execute
+TOOL_HANDLERS["list_models"] = ListModelsTool().execute
+
+from .session_tools import CreateSessionTool, ListSessionsTool, SendToSessionTool, ManageSessionTool
+TOOL_HANDLERS["create_session"] = CreateSessionTool().execute
+TOOL_HANDLERS["list_sessions"] = ListSessionsTool().execute
+TOOL_HANDLERS["send_to_session"] = SendToSessionTool().execute
+TOOL_HANDLERS["manage_session"] = ManageSessionTool().execute
 
 # ---------------------------------------------------------------------------
 # Constants (re-exported for backward compatibility — single source of truth
@@ -63,7 +70,7 @@ PYTHON_TIMEOUT = 30
 
 # Tool types that trigger execution
 TOOL_TAGS = {"bash", "python", "web_search", "web_fetch", "read_file", "write_file", "edit_file",
-             "grep", "glob", "ls", "get_workspace", "manage_bg_jobs",
+             "grep", "glob", "ls",
              "create_document", "update_document", "edit_document",
              "search_chats",
              "chat_with_model", "create_session", "list_sessions",
@@ -79,6 +86,8 @@ TOOL_TAGS = {"bash", "python", "web_search", "web_fetch", "read_file", "write_fi
              "resolve_contact", "manage_contact", "list_email_accounts", "send_email", "list_emails",
              "read_email", "reply_to_email", "bulk_email", "archive_email",
              "delete_email", "mark_email_read",
+             "search_emails", "draft_email", "draft_email_reply", "ai_draft_email_reply",
+             "download_attachment",
              # Cookbook tools (LLM serving + downloads). Without these
              # entries, native function calls to e.g. list_served_models
              # are rejected as "Unknown function call" before reaching
@@ -127,21 +136,22 @@ from src.tool_execution import (  # noqa: E402, F401
     format_tool_result,
 )
 
-# Document functions
-from .document_tools import (
-    set_active_document, 
-    set_active_model
-)
-
 # Implementations
-from src.tool_implementations import (  # noqa: E402, F401
-    do_search_chats,
-    do_manage_skills,
-    do_manage_tasks,
+from src.agent_tools.document_tools import (  # noqa: E402, F401
+    set_active_document,
+    set_active_model,
+    get_active_document,
+)
+from src.agent_tools.admin_tools import (  # noqa: E402, F401
     do_manage_endpoints,
     do_manage_mcp,
     do_manage_webhooks,
     do_manage_tokens,
     do_manage_settings,
+)
+from src.tool_implementations import (  # noqa: E402, F401
+    do_search_chats,
+    do_manage_skills,
+    do_manage_tasks,
     do_api_call,
 )

@@ -4,6 +4,7 @@ from pathlib import Path
 
 from fastapi import HTTPException
 
+from core.translations import t
 from src.constants import GENERATED_IMAGES_DIR
 
 
@@ -19,14 +20,14 @@ GENERATED_IMAGE_HEADERS = {
 
 def resolve_generated_image_path(filename: str) -> Path:
     if not isinstance(filename, str) or not GENERATED_IMAGE_RE.fullmatch(filename):
-        raise HTTPException(status_code=400, detail="Invalid filename")
+        raise HTTPException(status_code=400, detail=t("generated_images.invalid_filename"))
     root = GENERATED_IMAGE_DIR.resolve()
     path = (GENERATED_IMAGE_DIR / filename).resolve()
     try:
         if os.path.commonpath([str(root), str(path)]) != str(root):
             raise ValueError
     except Exception:
-        raise HTTPException(status_code=400, detail="Invalid filename")
+        raise HTTPException(status_code=400, detail=t("generated_images.invalid_filename"))
     if not path.exists():
-        raise HTTPException(status_code=404, detail="Image not found")
+        raise HTTPException(status_code=404, detail=t("generated_images.not_found"))
     return path

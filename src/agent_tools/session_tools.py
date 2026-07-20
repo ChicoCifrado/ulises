@@ -8,6 +8,7 @@ The session manager is a runtime-set singleton in src.ai_interaction, so each
 function fetches it via get_session_manager() (imported here); _resolve_model and
 AI_CHAT_TIMEOUT are reused from there too.
 """
+import asyncio
 import json
 import logging
 import uuid
@@ -40,7 +41,7 @@ async def create_session(content: str, session_id: Optional[str] = None, owner: 
         return {"error": "Session name cannot be empty"}
 
     try:
-        url, model, headers = _resolve_model(model_spec, owner=owner)
+        url, model, headers = await asyncio.to_thread(_resolve_model, model_spec, owner=owner)
     except ValueError as e:
         return {"error": str(e)}
 
@@ -181,8 +182,12 @@ async def send_to_session(content: str, session_id: Optional[str] = None, owner:
     if not sess:
         return {"error": f"Session '{target_sid}' not found"}
 
-    # Owner-scope: reject access to another user's session
-    if owner and getattr(sess, "owner", None) and sess.owner != owner:
+    # Owner-scope: reject access to another user's session. When the caller is
+    # authenticated, a null-owner (legacy / auth-was-off) session is not theirs
+    # either — list_sessions (get_sessions_for_user) and manage_session already
+    # exclude those, so treating it as reachable here let an authenticated agent
+    # read/write a session the other tools hide. Require an exact owner match.
+    if owner and getattr(sess, "owner", None) != owner:
         return {"error": f"Session '{target_sid}' not found"}
 
     if not message:

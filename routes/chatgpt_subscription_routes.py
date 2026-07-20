@@ -8,6 +8,7 @@ from typing import Dict, Optional
 from fastapi import HTTPException, Request
 
 from core.database import ModelEndpoint, ProviderAuthSession, SessionLocal, utcnow_naive
+from core.translations import t
 from routes.device_flow import (
     DeviceFlowPoll,
     DeviceFlowStart,
@@ -115,7 +116,7 @@ def _start_device_flow(request: Request, _form) -> DeviceFlowStart:
     device_auth_id = data.get("device_auth_id")
     user_code = data.get("user_code")
     if not device_auth_id or not user_code:
-        raise HTTPException(502, "ChatGPT did not return a complete device code")
+        raise HTTPException(502, t("chatgpt.error"))
     verification_uri = data.get("verification_uri") or f"{chatgpt_subscription.CHATGPT_OAUTH_ISSUER}/codex/device"
     return DeviceFlowStart(
         pending={

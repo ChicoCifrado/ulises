@@ -1,0 +1,11 @@
+{
+  "assistant": {
+    "not_authenticated": "No autenticado",
+    "cannot_seed": "No se puede inicializar el asistente para {owner}",
+    "could_not_resolve": "No se pudo resolver la sesión del asistente",
+    "not_available": "Asistente no disponible",
+    "not_found": "Asistente no encontrado",
+    "task_not_found": "Tarea no encontrada",
+    "not_assistant_task": "No es una tarea del asistente"
+  }
+}

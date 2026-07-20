@@ -1,6 +1,7 @@
 // compare/probe.js — model probe/check system
 import state from './state.js';
 import { WAVE_FRAMES } from './icons.js';
+import { t } from '../i18n.js';
 import uiModule from '../ui.js';
 import spinnerModule from '../spinner.js';
 
@@ -12,7 +13,7 @@ function _clearProbeWaves() {
 async function _checkUnprobed() {
   const unprobed = state._selectedModels.filter(m => !state._probed.has(m.model));
   if (unprobed.length === 0) {
-    if (uiModule) uiModule.showToast('All models verified');
+    if (uiModule) uiModule.showToast(t('compare.all_verified'));
     return;
   }
 
@@ -54,15 +55,15 @@ async function _checkUnprobed() {
         ok++;
       } else {
         fail++;
-        const name = isBlind ? 'a model' : (m.name || m.model.split('/').pop());
-        if (uiModule) uiModule.showToast(`${name} failed: ${result?.error || 'unknown'}`, 5000);
+        const name = isBlind ? t('compare.a_model') : (m.name || m.model.split('/').pop());
+        if (uiModule) uiModule.showToast(t('compare.model_failed', { name, error: result?.error || t('common.unknown') }), 5000);
       }
     } catch (e) {
       fail++;
     }
   }
   if (fail === 0) {
-    if (uiModule) uiModule.showToast(`${ok} model${ok > 1 ? 's' : ''} verified`);
+    if (uiModule) uiModule.showToast(t('compare.verified', { count: ok, s: ok > 1 ? 's' : '' }));
   }
   } finally {
     // Restore the Probe button (its label/visibility is refreshed below).

@@ -136,6 +136,10 @@ DEFAULT_SETTINGS = {
     "task_model": "",
     "default_endpoint_id": "",
     "default_model": "",
+    # Optional prose style used only for normal document writing/editing.
+    # Email replies use email_writing_style instead because greetings,
+    # signatures, and mailbox identity rules are medium-specific.
+    "document_writing_style": "",
     # Ordered fallback chain for the default chat model. Each entry is
     # {"endpoint_id": "...", "model": "..."}. If the primary model fails
     # before producing output (endpoint offline / errors), the chat
@@ -180,6 +184,7 @@ DEFAULT_SETTINGS = {
         "NOT urgent."
     ),
     # Keyboard shortcuts (action: key combination)
+    "app_language": "en",
     "keybinds": {
         "search": "ctrl+k",
         "toggle_sidebar": "ctrl+b",
@@ -258,6 +263,7 @@ def is_setting_overridden(key: str) -> bool:
 # model + image-generation model. The owner argument is the authed username
 # resolved by FastAPI deps; an empty/None owner falls through to the global.
 _PER_USER_KEYS = {
+    "app_language",
     "vision_model", "vision_enabled", "vision_model_fallbacks",
     "image_model", "image_gen_enabled", "image_quality",
     # Default chat endpoint / model — without per-user resolution every new

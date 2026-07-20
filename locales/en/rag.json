@@ -1,0 +1,11 @@
+{
+  "rag": {
+    "collection_not_initialized": "Collection not initialized",
+    "empty_document_list": "Empty document list",
+    "no_valid_documents": "No valid documents",
+    "no_embedding_accepted": "No embedding lane accepted the batch",
+    "no_docs_found": "No docs found",
+    "removed_chunks": "Removed {count} chunks",
+    "no_owner_rename_needed": "No owner rename needed"
+  }
+}

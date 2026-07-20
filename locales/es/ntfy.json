@@ -1,0 +1,11 @@
+{
+  "ntfy": {
+    "sent_instruction": "Enviado a {url} — en tu app de ntfy, suscríbete al tema \"{topic}\" con el servidor \"{base}\" (o pega la URL completa: {full_url}).",
+    "http_error": "ntfy devolvió HTTP {status} desde {url}: {text}",
+    "failed": "La publicación de ntfy en {url} falló: {error}",
+    "no_webhook_url": "No hay URL de webhook configurada — pega la URL completa del webhook de Discord en el campo URL base.",
+    "test_sent": "Embed de prueba enviado — revisa tu canal de Discord para confirmar que llegó.",
+    "discord_error": "Discord devolvió HTTP {status}: {text}",
+    "request_failed": "Error en la solicitud: {error}"
+  }
+}

@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from core.database import SessionLocal, Note
+from core.translations import t
 from core.middleware import INTERNAL_TOOL_USER
 from src.auth_helpers import require_user
 from src.constants import DATA_DIR
@@ -335,10 +336,11 @@ async def dispatch_reminder(
             # Loud diagnostic so we can see WHY a reminder didn't send (the
             # previous "silently no-op when cfg has no smtp_host" was invisible).
             logger.info(
-                f"dispatch_reminder[email] note_id={note_id} owner={owner!r} "
-                f"smtp_host={cfg.get('smtp_host')!r} smtp_user={cfg.get('smtp_user')!r} "
-                f"from={from_addr!r} recipient={recipient!r} "
-                f"account_name={cfg.get('account_name')!r}"
+                "dispatch_reminder[email] note_id=%s owner=%r "
+                "has_smtp_host=%s has_smtp_user=%s has_from=%s has_recipient=%s",
+                note_id, owner,
+                bool(cfg.get("smtp_host")), bool(cfg.get("smtp_user")),
+                bool(from_addr), bool(recipient),
             )
             missing = []
             if not cfg.get("smtp_host"):
@@ -482,11 +484,22 @@ async def dispatch_reminder(
                 api_key = intg.get("api_key", "")
                 if api_key:
                     hdrs["Authorization"] = f"Bearer {api_key}"
-                async with httpx.AsyncClient(timeout=10.0) as client:
-                    resp = await client.post(f"{base}/{topic}", content=ntfy_body, headers=hdrs)
-                    ntfy_sent = resp.is_success
-                    if not ntfy_sent:
-                        ntfy_error = f"ntfy returned HTTP {resp.status_code}"
+                # SSRF guard — same check (and env knob) as the webhook branch
+                # above: link-local / metadata addresses are always rejected;
+                # REMINDER_WEBHOOK_BLOCK_PRIVATE_IPS=true also blocks RFC-1918
+                # so a ntfy base_url can't be pointed at internal services.
+                import os as _os
+                from src.url_safety import check_outbound_url as _chk
+                _block = _os.getenv("REMINDER_WEBHOOK_BLOCK_PRIVATE_IPS", "false").lower() == "true"
+                _ok, _reason = _chk(f"{base}/{topic}", block_private=_block)
+                if not _ok:
+                    ntfy_error = f"ntfy URL rejected: {_reason}"
+                else:
+                    async with httpx.AsyncClient(timeout=10.0) as client:
+                        resp = await client.post(f"{base}/{topic}", content=ntfy_body, headers=hdrs)
+                        ntfy_sent = resp.is_success
+                        if not ntfy_sent:
+                            ntfy_error = f"ntfy returned HTTP {resp.status_code}"
             else:
                 ntfy_error = "No enabled ntfy integration"
         except Exception as e:
@@ -620,9 +633,9 @@ def setup_note_routes(task_scheduler=None):
                 q = q.filter(Note.label == label)
             # Archived view: most recently archived first. Active view: pin + manual order.
             if archived is True:
-                notes = q.order_by(Note.updated_at.desc()).all()
+                notes = q.order_by(Note.updated_at.desc()).limit(500).all()
             else:
-                notes = q.order_by(Note.pinned.desc(), Note.sort_order.asc(), Note.updated_at.desc()).all()
+                notes = q.order_by(Note.pinned.desc(), Note.sort_order.asc(), Note.updated_at.desc()).limit(500).all()
             return {"notes": [_note_to_dict(n) for n in notes]}
         finally:
             db.close()
@@ -665,11 +678,11 @@ def setup_note_routes(task_scheduler=None):
         try:
             note = db.query(Note).filter(Note.id == note_id).first()
             if not note:
-                raise HTTPException(404, "Note not found")
+                raise HTTPException(404, t("notes.not_found"))
             # SECURITY: strict ownership — previously `note.owner and note.owner != user`
             # let any user touch a row whose owner field was null/empty.
             if user is not None and note.owner != user:
-                raise HTTPException(404, "Note not found")
+                raise HTTPException(404, t("notes.not_found"))
             return _note_to_dict(note)
         finally:
             db.close()
@@ -682,11 +695,11 @@ def setup_note_routes(task_scheduler=None):
         try:
             note = db.query(Note).filter(Note.id == note_id).first()
             if not note:
-                raise HTTPException(404, "Note not found")
+                raise HTTPException(404, t("notes.not_found"))
             # SECURITY: strict ownership — previously `note.owner and note.owner != user`
             # let any user touch a row whose owner field was null/empty.
             if user is not None and note.owner != user:
-                raise HTTPException(404, "Note not found")
+                raise HTTPException(404, t("notes.not_found"))
 
             if body.title is not None:
                 note.title = body.title
@@ -730,11 +743,11 @@ def setup_note_routes(task_scheduler=None):
         try:
             note = db.query(Note).filter(Note.id == note_id).first()
             if not note:
-                raise HTTPException(404, "Note not found")
+                raise HTTPException(404, t("notes.not_found"))
             # SECURITY: strict ownership — previously `note.owner and note.owner != user`
             # let any user touch a row whose owner field was null/empty.
             if user is not None and note.owner != user:
-                raise HTTPException(404, "Note not found")
+                raise HTTPException(404, t("notes.not_found"))
             db.delete(note)
             db.commit()
             return {"ok": True}
@@ -749,11 +762,11 @@ def setup_note_routes(task_scheduler=None):
         try:
             note = db.query(Note).filter(Note.id == note_id).first()
             if not note:
-                raise HTTPException(404, "Note not found")
+                raise HTTPException(404, t("notes.not_found"))
             # SECURITY: strict ownership — previously `note.owner and note.owner != user`
             # let any user touch a row whose owner field was null/empty.
             if user is not None and note.owner != user:
-                raise HTTPException(404, "Note not found")
+                raise HTTPException(404, t("notes.not_found"))
             note.pinned = not note.pinned
             db.commit()
             return {"ok": True, "pinned": note.pinned}
@@ -768,11 +781,11 @@ def setup_note_routes(task_scheduler=None):
         try:
             note = db.query(Note).filter(Note.id == note_id).first()
             if not note:
-                raise HTTPException(404, "Note not found")
+                raise HTTPException(404, t("notes.not_found"))
             # SECURITY: strict ownership — previously `note.owner and note.owner != user`
             # let any user touch a row whose owner field was null/empty.
             if user is not None and note.owner != user:
-                raise HTTPException(404, "Note not found")
+                raise HTTPException(404, t("notes.not_found"))
             note.archived = not note.archived
             db.commit()
             return {"ok": True, "archived": note.archived}
@@ -787,16 +800,16 @@ def setup_note_routes(task_scheduler=None):
         try:
             note = db.query(Note).filter(Note.id == note_id).first()
             if not note:
-                raise HTTPException(404, "Note not found")
+                raise HTTPException(404, t("notes.not_found"))
             # SECURITY: strict ownership — previously `note.owner and note.owner != user`
             # let any user touch a row whose owner field was null/empty.
             if user is not None and note.owner != user:
-                raise HTTPException(404, "Note not found")
+                raise HTTPException(404, t("notes.not_found"))
             if not note.items:
-                raise HTTPException(400, "Note has no checklist items")
+                raise HTTPException(400, t("notes.no_checklist_items"))
             items = json.loads(note.items)
             if index < 0 or index >= len(items):
-                raise HTTPException(400, f"Item index {index} out of range")
+                raise HTTPException(400, t("notes.item_index_out_of_range").format(index=index))
             items[index]["done"] = not items[index].get("done", False)
             note.items = json.dumps(items)
             flag_modified(note, "items")
@@ -819,7 +832,7 @@ def setup_note_routes(task_scheduler=None):
         body = await request.json()
         note_id = str(body.get("note_id") or "").strip()
         if not note_id:
-            raise HTTPException(400, "note_id required")
+            raise HTTPException(400, t("notes.note_id_required"))
 
         caller = _owner(request)
         is_test = note_id.startswith("test-")
@@ -827,7 +840,7 @@ def setup_note_routes(task_scheduler=None):
         _override: dict = {}
         if is_test:
             if not is_admin:
-                raise HTTPException(403, "Admin only")
+                raise HTTPException(403, t("notes.admin_only"))
             title = (body.get("title") or "Test Reminder").strip() or "Test Reminder"
             note_body = (body.get("body") or "").strip()
             # Optional overrides let the admin settings test button pass the
@@ -849,9 +862,9 @@ def setup_note_routes(task_scheduler=None):
             try:
                 note = db.query(Note).filter(Note.id == note_id).first()
                 if not note:
-                    raise HTTPException(404, "Note not found")
+                    raise HTTPException(404, t("notes.not_found"))
                 if caller is not None and note.owner != caller:
-                    raise HTTPException(404, "Note not found")
+                    raise HTTPException(404, t("notes.not_found"))
                 title, note_body = _reminder_text_from_note(note)
             finally:
                 db.close()
@@ -871,7 +884,7 @@ def setup_note_routes(task_scheduler=None):
         body = await request.json()
         ids = body.get("ids", [])
         if not isinstance(ids, list):
-            raise HTTPException(400, "ids must be a list")
+            raise HTTPException(400, t("notes.ids_must_be_list"))
         # v2 review HIGH-12: drop the legacy `(owner == user) | (owner ==
         # None)` OR which let an authenticated user silently reorder
         # every legacy-null-owner note belonging to other accounts. In

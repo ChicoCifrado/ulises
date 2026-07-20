@@ -1,0 +1,12 @@
+{
+  "assistant": {
+    "unavailable": "Sesión de asistente no disponible",
+    "could_not_open": "No se pudo abrir el asistente",
+    "checkin_running": "Verificación en curso...",
+    "checkin_failed": "No se pudo ejecutar la verificación",
+    "saved": "Ajustes del asistente guardados",
+    "save_failed": "Error al guardar",
+    "not_found": "Asistente no encontrado",
+    "not_available": "Asistente no disponible"
+  }
+}

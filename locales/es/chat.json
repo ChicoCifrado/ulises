@@ -1,0 +1,18 @@
+{
+  "chat": {
+    "session_not_found": "Sesión '{name}' no encontrada",
+    "session_not_found_generic": "Sesión no encontrada",
+    "model_removed": "El endpoint del modelo seleccionado fue eliminado. Elige otro modelo en Configuración.",
+    "no_model_selected": "No hay modelo seleccionado para este chat. Abre el selector de modelos y elige uno antes de enviar.",
+    "invalid_json": "JSON inválido: {error}",
+    "invalid_request": "Parámetros de solicitud inválidos",
+    "no_active_run": "No hay una ejecución activa para esta sesión",
+    "no_active_stream": "No hay un flujo activo para esta sesión",
+    "tool_blocked": "Herramienta bloqueada por la política",
+    "image_gen_disabled": "La generación de imágenes está deshabilitada por el administrador.",
+    "session_required": "session_id, original_text e instruction son obligatorios",
+    "invalid_json_parse": "JSON inválido",
+    "request_parsing_error": "Error al analizar la solicitud: {error}",
+    "invalid_preset_id": "ID de preset inválido: {preset_id}"
+  }
+}

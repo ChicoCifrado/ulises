@@ -1,0 +1,15 @@
+{
+  "files": {
+    "no_files": "No files uploaded",
+    "file_too_large": "File too large",
+    "unsupported_type": "Unsupported file type",
+    "all_uploads_failed": "All file uploads failed",
+    "upload_stats_failed": "Failed to get upload statistics",
+    "invalid_id": "Invalid file ID",
+    "access_denied": "Access denied",
+    "not_found": "File not found",
+    "not_image": "Not an image",
+    "vision_failed": "Vision analysis failed: {{error}}",
+    "text_must_be_string": "Text must be a string"
+  }
+}

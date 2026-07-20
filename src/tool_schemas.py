@@ -14,8 +14,15 @@ from typing import Optional
 
 from src.agent_tools import ToolBlock, TOOL_TAGS
 from src.tool_parsing import _TOOL_NAME_MAP
+from src.tool_security import BUILTIN_EMAIL_TOOLS
 
 logger = logging.getLogger(__name__)
+
+BUILTIN_EMAIL_TOOLS = {
+    "list_email_accounts", "send_email", "list_emails", "read_email",
+    "reply_to_email", "archive_email", "delete_email", "mark_email_read",
+    "bulk_email", "download_attachment",
+}
 
 # ---------------------------------------------------------------------------
 # OpenAI-compatible function tool schemas
@@ -186,7 +193,7 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "create_document",
-            "description": "Create a new document in the editor panel. Use this when the user asks to write, create, build, or generate code, scripts, programs, games, apps, or any substantial content (>15 lines) AND there is no already-open document/email draft that the request refers to. If an email compose draft is open, edit that draft instead of creating another document. NEVER put large code blocks directly in chat — use this tool instead.",
+            "description": "Create a new document in the editor panel. Use this when the user asks to write, create, build, make, or generate code, scripts, programs, games, apps, or any long-form or structured content that is more than a short paragraph, AND there is no already-open document/email draft that the request refers to. If an email compose draft is open, edit that draft instead of creating another document. NEVER put large generated content directly in chat — use this tool instead.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -467,7 +474,7 @@ FUNCTION_TOOL_SCHEMAS = [
                     "question": {"type": "string", "description": "The question to ask. Be specific and self-contained."},
                     "options": {
                         "type": "array",
-                        "description": "2-6 mutually exclusive choices. Each is an object with a short `label` and an optional `description` explaining the trade-off.",
+                        "description": "2-6 choices. Each is an object with a short `label` and an optional `description` explaining the trade-off.",
                         "items": {
                             "type": "object",
                             "properties": {
@@ -477,7 +484,7 @@ FUNCTION_TOOL_SCHEMAS = [
                             "required": ["label"]
                         }
                     },
-                    "multi": {"type": "boolean", "description": "Set true to let the user select multiple options instead of one. Default false."}
+                    "multi": {"type": "boolean", "description": "Set true ONLY when the question explicitly allows choosing more than one option. Otherwise omit it or set false. Default false."}
                 },
                 "required": ["question", "options"]
             }
@@ -554,8 +561,8 @@ FUNCTION_TOOL_SCHEMAS = [
                     "uid": {"type": "string", "description": "Event UID (for update/delete)"},
                     "calendar_href": {"type": "string", "description": "Specific calendar URL (optional; defaults to first calendar)"},
                     "calendar": {"type": "string", "description": "Filter list_events by calendar name or href"},
-                    "start": {"type": "string", "description": "list_events range start (ISO datetime); defaults to today. Prefer start; backend also accepts start_date, range_start, from, dtstart, since."},
-                    "end": {"type": "string", "description": "list_events range end (ISO datetime); defaults to +14 days. Prefer end; backend also accepts end_date, range_end, to, dtend, until."},
+                    "start": {"type": "string", "description": "list_events range start (ISO datetime). Use this for month/week requests after resolving the date range; do not pass a loose query string. Prefer start; backend also accepts start_time, start_date, range_start, from, dtstart, since."},
+                    "end": {"type": "string", "description": "list_events range end (ISO datetime). Use this for month/week requests after resolving the date range; defaults to +14 days only when no range is requested. Prefer end; backend also accepts end_time, end_date, range_end, to, dtend, until."},
                     "event_type": {"type": "string", "description": "Tag / category for the event. Common values: work, personal, health, travel, meal, social, admin, other. Aliases accepted: tag, category, type."},
                     "importance": {"type": "string", "enum": ["low", "normal", "high", "critical"], "description": "Priority level (defaults to 'normal')"},
                     "reminder_minutes": {"type": "integer", "description": "For create_event: create an Ulises reminder this many minutes before the event, e.g. 5 for 'reminder 5 min before'."},
@@ -1210,27 +1217,97 @@ FUNCTION_TOOL_SCHEMAS = [
 # Converter: native function call -> ToolBlock
 # ---------------------------------------------------------------------------
 
+def _decode_loose_json_string(value: str) -> str:
+    """Decode common JSON string escapes without requiring inner quotes to be escaped."""
+    out = []
+    i = 0
+    while i < len(value):
+        ch = value[i]
+        if ch != "\\" or i + 1 >= len(value):
+            out.append(ch)
+            i += 1
+            continue
+        nxt = value[i + 1]
+        if nxt == "n":
+            out.append("\n")
+        elif nxt == "r":
+            out.append("\r")
+        elif nxt == "t":
+            out.append("\t")
+        elif nxt == "b":
+            out.append("\b")
+        elif nxt == "f":
+            out.append("\f")
+        elif nxt in ('"', "\\", "/"):
+            out.append(nxt)
+        elif nxt == "u" and i + 5 < len(value):
+            try:
+                out.append(chr(int(value[i + 2:i + 6], 16)))
+                i += 4
+            except ValueError:
+                out.append("\\" + nxt)
+        else:
+            out.append("\\" + nxt)
+        i += 2
+    return "".join(out)
+
+
+def _repair_document_function_args(tool_type: str, arguments: str) -> Optional[dict]:
+    """Salvage obvious malformed document tool args from local model wrappers.
+
+    The doc LoRA sometimes emits the right native tool call but puts raw quotes
+    inside the document text, making the surrounding JSON invalid. Treat that as
+    a wrapper parse failure, not a semantic tool-choice failure.
+    """
+    if tool_type != "update_document" or not isinstance(arguments, str):
+        return None
+    raw = arguments.strip()
+    if not raw.startswith("{") or not raw.endswith("}"):
+        return None
+    for key in ("content", "conten"):
+        marker = f'"{key}"'
+        key_pos = raw.find(marker)
+        if key_pos < 0:
+            continue
+        colon_pos = raw.find(":", key_pos + len(marker))
+        if colon_pos < 0:
+            continue
+        first_quote = raw.find('"', colon_pos + 1)
+        if first_quote < 0:
+            continue
+        close_brace = raw.rfind("}")
+        last_quote = raw.rfind('"', first_quote + 1, close_brace)
+        if last_quote <= first_quote:
+            continue
+        content = _decode_loose_json_string(raw[first_quote + 1:last_quote])
+        return {"content": content}
+    return None
+
+
 def function_call_to_tool_block(name: str, arguments: str) -> Optional[ToolBlock]:
     """Convert a native function call into a ToolBlock for the existing execution pipeline."""
+    tool_type = _TOOL_NAME_MAP.get(name, name)
     try:
         if not arguments or (isinstance(arguments, str) and not arguments.strip()):
             args = {}
         else:
             args = json.loads(arguments) if isinstance(arguments, str) else arguments
     except (json.JSONDecodeError, TypeError):
-        logger.error(f"Failed to parse function call arguments for {name}: {arguments}")
-        return None
-
-    tool_type = _TOOL_NAME_MAP.get(name, name)
-    _BUILTIN_EMAIL_TOOLS = {"list_email_accounts", "send_email", "list_emails", "read_email", "reply_to_email",
-                            "archive_email", "delete_email", "mark_email_read", "bulk_email", "download_attachment"}
+        args = _repair_document_function_args(tool_type, arguments)
+        if args is not None:
+            logger.warning(f"Repaired malformed document function call arguments for {name}")
+        else:
+            logger.error(f"Failed to parse function call arguments for {name}: {arguments}")
+            return None
 
     # Some models emit valid JSON that isn't an object (e.g. a bare array
     # ["ls -la"], string, or number) as function arguments. Most local tools keep
     # the legacy empty-object coercion for stream robustness, but email MCP tools
     # must fail closed so a malformed call cannot read the default mailbox.
+    # Uses the shared BUILTIN_EMAIL_TOOLS (single source of truth) so the
+    # fail-closed set can't drift from the dispatch/blocklist sets.
     if not isinstance(args, dict):
-        if tool_type.startswith("mcp__email__") or name in _BUILTIN_EMAIL_TOOLS:
+        if tool_type.startswith("mcp__email__") or name in BUILTIN_EMAIL_TOOLS:
             logger.warning(f"Non-object email function call arguments for {name}: {args!r}; rejecting")
             return None
         logger.warning(f"Non-object function call arguments for {name}: {args!r}; treating as empty")
@@ -1241,7 +1318,7 @@ def function_call_to_tool_block(name: str, arguments: str) -> Optional[ToolBlock
         content = json.dumps(args) if args else "{}"
         return ToolBlock(tool_type, content)
     # Email tools are implemented as MCP — route them to email
-    if name in _BUILTIN_EMAIL_TOOLS:
+    if name in BUILTIN_EMAIL_TOOLS:
         return ToolBlock(f"mcp__email__{name}", json.dumps(args) if args else "{}")
     if tool_type not in TOOL_TAGS:
         logger.warning(f"Unknown function call: {name}")
@@ -1406,6 +1483,12 @@ def function_call_to_tool_block(name: str, arguments: str) -> Optional[ToolBlock
         content = json.dumps(args)
     elif tool_type == "ask_teacher":
         content = args.get("model", "auto") + "\n" + args.get("problem", "")
+    elif tool_type == "ask_user":
+        # Keep user-facing labels readable in the tool trace.  The outer SSE
+        # JSON encoder will escape them for transport and JSON.parse restores
+        # them once; pre-escaping here caused literal ``\u00f1`` sequences to
+        # remain visible in the debug panel.
+        content = json.dumps(args, ensure_ascii=False)
     else:
         content = json.dumps(args)
 

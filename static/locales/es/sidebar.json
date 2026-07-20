@@ -1,0 +1,65 @@
+{
+  "sidebar": {
+    "aria_label": "Barra lateral",
+    "toggle": "Mostrar/ocultar barra lateral",
+    "show": "Mostrar barra lateral",
+    "new_chat": "Nuevo chat",
+    "search_title": "Buscar conversaciones (Ctrl+K)",
+    "search": "Buscar",
+    "chats": "Chats",
+    "manage": "gestionar",
+    "manage_title": "Gestionar chats (Biblioteca)",
+    "sort_sessions": "Ordenar sesiones",
+    "group": "Grupo",
+    "sorting": "Ordenando...",
+    "bulk_all": "Todo",
+    "bulk_archive": "Archivar seleccionados",
+    "bulk_delete": "Eliminar seleccionados",
+    "bulk_cancel": "Cancelar",
+    "session_actions": {
+      "rename": "Renombrar",
+      "rename_desc": "Cambiar el nombre de la sesión",
+      "delete": "Eliminar",
+      "delete_desc": "Eliminar esta sesión permanentemente",
+      "memory": "Memoria",
+      "memory_desc": "Extraer recuerdos de esta sesión"
+    },
+    "email": {
+      "title": "Correo",
+      "open_inbox": "Abrir bandeja de entrada",
+      "compose": "Redactar correo",
+      "new": "nuevo"
+    },
+    "models": {
+      "title": "Modelos",
+      "sort": "Ordenar modelos",
+      "select": "Seleccionar modelo",
+      "add_chat": "+ Chat",
+      "add_chat_aria": "Agregar chat de modelo"
+    },
+    "tools": {
+      "title": "Herramientas",
+      "brain": "Cerebro",
+      "calendar": "Calendario",
+      "compare": "Comparar",
+      "cookbook": "Cookbook",
+      "deep_research": "Deep Research",
+      "gallery": "Galería",
+      "library": "Biblioteca",
+      "new_doc": "Nuevo documento",
+      "document": "documento",
+      "notes": "Notas",
+      "tasks": "Tareas",
+      "theme": "Tema"
+    },
+    "user": {
+      "label": "Usuario",
+      "settings": "Ajustes"
+    },
+    "icon_rail": {
+      "chats_ready": "Chat listo",
+      "documents": "Documentos",
+      "settings": "Ajustes"
+    }
+  }
+}

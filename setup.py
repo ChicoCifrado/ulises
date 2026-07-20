@@ -5,8 +5,10 @@ Creates data directories, initializes the database, and sets up an
 initial admin user. Safe to re-run (skips what already exists).
 """
 
+import importlib
 import os
 import platform
+import secrets
 import shutil
 import subprocess
 import sys
@@ -115,7 +117,7 @@ def create_default_admin():
         else:
             # Non-interactive (Docker, CI) — fall back to generated password
             username = username or "admin"
-            password = password or __import__("secrets").token_urlsafe(18)
+            password = password or secrets.token_urlsafe(18)
 
         username = username or "admin"
         hashed = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
@@ -174,7 +176,7 @@ def check_deps():
     missing = []
     for mod in ["fastapi", "uvicorn", "sqlalchemy", "bcrypt", "httpx", "dotenv"]:
         try:
-            __import__(mod)
+            importlib.import_module(mod)
         except ImportError:
             missing.append(mod)
     if missing:
@@ -238,6 +240,24 @@ def check_arch():
 
 def main():
     print("\n=== Ulises Setup ===\n")
+
+    # Load .env so pre-seeded ODYSSEUS_ADMIN_USER / ODYSSEUS_ADMIN_PASSWORD (and
+    # other deployment vars) are honored on native installs, not just when they
+    # are exported in the shell. Mirrors app.py: encoding="utf-8-sig" tolerates a
+    # UTF-8 BOM in a Notepad-saved .env. load_dotenv does not override already
+    # exported OS env vars, so the existing precedence is preserved. python-dotenv
+    # is a hard dependency (requirements.txt) and is verified by check_deps below.
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(BASE_DIR, ".env"), encoding="utf-8-sig")
+
+    # Load .env so pre-seeded ODYSSEUS_ADMIN_USER / ODYSSEUS_ADMIN_PASSWORD (and
+    # other deployment vars) are honored on native installs, not just when they
+    # are exported in the shell. Mirrors app.py: encoding="utf-8-sig" tolerates a
+    # UTF-8 BOM in a Notepad-saved .env. load_dotenv does not override already
+    # exported OS env vars, so the existing precedence is preserved. python-dotenv
+    # is a hard dependency (requirements.txt) and is verified by check_deps below.
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(BASE_DIR, ".env"), encoding="utf-8-sig")
 
     # Fail fast with a clear message if the CPU architecture is wrong (Apple
     # Silicon under an x86/Rosetta Python) before importing anything native.

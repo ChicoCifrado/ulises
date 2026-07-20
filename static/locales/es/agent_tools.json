@@ -1,0 +1,16 @@
+{
+  "agent_tools": {
+    "bash_timed_out": "bash: tiempo de espera agotado después de {{timeout}}s — proceso terminado",
+    "python_timed_out": "python: tiempo de espera agotado después de {{timeout}}s — proceso terminado",
+    "session_manager_unavailable": "Gestor de sesiones no disponible",
+    "session_format": "Se necesitan 2 líneas: nombre de la sesión, luego especificación del modelo",
+    "session_name_empty": "El nombre de la sesión no puede estar vacío",
+    "session_create_failed": "Error al crear la sesión: {{error}}",
+    "session_send_format": "Se necesitan 2 líneas: session_id, luego mensaje",
+    "session_not_found": "Sesión '{{id}}' no encontrada",
+    "session_no_message": "No se proporcionó ningún mensaje",
+    "session_send_failed": "Error al enviar a la sesión: {{error}}",
+    "missing_action": "Falta la acción (rename|archive|delete|important|truncate|fork|list|switch)",
+    "need_session_id": "Se necesita un session_id (o 'current' para el chat activo)"
+  }
+}

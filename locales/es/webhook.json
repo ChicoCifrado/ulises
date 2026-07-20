@@ -1,0 +1,14 @@
+{
+  "webhook": {
+    "name_required": "El nombre del webhook es obligatorio",
+    "not_found": "Webhook no encontrado",
+    "endpoint_requires_token": "Este endpoint requiere un token de API",
+    "token_not_scoped": "El token de API no tiene alcance para chat",
+    "message_required": "El mensaje es obligatorio",
+    "no_session_api_key": "No hay sesión, api_key ni endpoints configurados. Proporciona api_key + model, o configura un endpoint en Administración.",
+    "could_not_resolve": "No se pudieron resolver las credenciales del endpoint",
+    "could_not_discover": "No se pudieron descubrir modelos del endpoint",
+    "session_manager_unavailable": "Gestor de sesiones no disponible",
+    "auto_detect_failed": "No se pudo detectar el proveedor automáticamente. Proporciona base_url (ej. 'https://api.deepseek.com/v1') o el proveedor ('deepseek', 'openai', 'groq', etc.)"
+  }
+}

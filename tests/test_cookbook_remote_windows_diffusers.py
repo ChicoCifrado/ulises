@@ -53,5 +53,5 @@ async def test_remote_windows_diffusers_is_rejected_before_runner_launch(monkeyp
         await endpoint(_admin_request(), req)
 
     assert exc.value.status_code == 400
-    assert "Remote Windows Diffusers" in str(exc.value.detail)
+    assert "Diffusion serving requires" in str(exc.value.detail)
     assert calls == []

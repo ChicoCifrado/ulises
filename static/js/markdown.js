@@ -7,6 +7,7 @@
 import uiModule from './ui.js';
 import { splitTableRow } from './markdown/tableRow.js';
 import { replaceEmojiShortcodes, hasEmojiShortcode } from './emojiShortcodes.js';
+import { t } from './i18n.js';
 
 var escapeHtml = uiModule.esc;
 
@@ -133,7 +134,7 @@ function _cleanAllowedHtmlOnce(htmlString) {
   return tpl.innerHTML;
 }
 
-function sanitizeAllowedHtml(html) {
+export function sanitizeAllowedHtml(html) {
   const raw = String(html == null ? '' : html);
   // Non-browser context (e.g. a future SSR/Node import): fail closed by
   // escaping rather than trusting the markup.
@@ -165,7 +166,7 @@ export function hasUnclosedThinkTag(text) {
 }
 
 export function startsWithReasoningPrefix(text) {
-  return /^\s*(?:thinking(?:\s+process)?\s*:|the user |i need |i should |i will |they are |the question |i can )/i.test(text || '');
+  return /^\s*(?:thinking(?:\s+process)?\s*:|the user |user wants|we need |i need |i should |i will |i'll |i am going |let me (?:think|look|see|check|read|review|analyze|parse|figure|draft|write)|they are |the question |i can )/i.test(text || '');
 }
 
 export function normalizeThinkingMarkup(text) {
@@ -234,6 +235,11 @@ function normalizePlainThinking(text) {
       const reply = withoutPrefix.slice(match.index + 1).trim();
       if (thinkBlock && reply) return `<think>${thinkBlock}</think>\n${reply}`;
     }
+  }
+
+  if (/^\s*(?:thinking(?:\s+process)?\s*:|the user |user wants|we need |let me (?:think|look|see|check|read|review|analyze|parse|figure|draft|write)|i need to |i should |i will |i'll |i am going )/i.test(trimmed)) {
+    const thinkBlock = withoutPrefix.trim();
+    if (thinkBlock) return `<think>${thinkBlock}</think>`;
   }
 
   return text;
@@ -334,7 +340,7 @@ function createThinkingSection(thinkingContent, index = 0, thinkingTime = null) 
     <div class="thinking-section">
       <div class="thinking-header" data-thinking-id="${id}">
         <div class="thinking-header-left">
-          <span>View thinking process</span>
+          <span>${t('markdown.view_thinking_process')}</span>
         </div>
         <div style="display:flex;align-items:center;gap:6px;">
           ${timeHtml}
@@ -356,7 +362,7 @@ function createTaskCompletedMarker() {
       <span class="task-completed-icon" aria-hidden="true">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
       </span>
-      <span>Task completed</span>
+      <span>${t('markdown.task_completed')}</span>
     </div>
   `;
 }
@@ -445,7 +451,7 @@ export function createCollapsible(contentMarkdown, label = 'details') {
   return `
     <div class="thinking-section">
       <div class="thinking-header" data-thinking-id="${id}">
-        <div class="thinking-header-left"><span data-label="${safeLabel}">View ${safeLabel}</span></div>
+        <div class="thinking-header-left"><span data-label="${safeLabel}">${t('markdown.view')} ${safeLabel}</span></div>
         <div style="display:flex;align-items:center;gap:6px;"><span class="thinking-toggle" id="${id}-toggle"></span></div>
       </div>
       <div class="thinking-content" id="${id}"><div class="thinking-content-inner">${mdToHtml(contentMarkdown)}</div></div>
@@ -483,6 +489,7 @@ export function processWithThinking(text) {
 export function mdToHtml(src, opts) {
   const allowedHtmlBlocks = [];
   const codeBlocks = [];
+  const inlineCodeBlocks = [];
   const mermaidBlocks = [];
   let s = (src ?? '');
 
@@ -518,6 +525,19 @@ export function mdToHtml(src, opts) {
     const editBtn = `<button type="button" class="edit-code" title="Edit"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>`;
     codeBlocks.push(`<pre><code${langClass} data-lang="${lang || ''}">${escapeHtml(escaped)}</code>${runBtn}${editBtn}<button type="button" class="copy-code" data-code="${escapeHtml(escaped)}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button></pre>`);
 
+    return placeholder;
+  });
+
+  // Extract inline code spans before the link/autolink/HTML passes, mirroring
+  // the fenced-block handling above. A URL inside `inline code` (e.g.
+  // `irm http://127.0.0.1:3000/x`) is preceded by a space, so the bare-URL
+  // autolink matches it, wraps it in an <a> tag, and swaps that for an
+  // ___ALLOWED_HTML_ placeholder — corrupting the command. The old inline-code
+  // pass ran after those passes, too late to protect it.
+  s = s.replace(/`([^`]+?)`/g, (match, code) => {
+    if (code.startsWith('___CODE_BLOCK_') || code.startsWith('___MERMAID_BLOCK_')) return match;
+    const placeholder = `___INLINE_CODE_${inlineCodeBlocks.length}___`;
+    inlineCodeBlocks.push(`<code>${escapeHtml(code)}</code>`);
     return placeholder;
   });
 
@@ -678,12 +698,6 @@ export function mdToHtml(src, opts) {
     return html;
   });
 
-  // Inline code (but not placeholders)
-  s = s.replace(/`([^`]+?)`/g, (match, code) => {
-    if (code.startsWith('___CODE_BLOCK_') || code.startsWith('___ALLOWED_HTML_')) return match;
-    return `<code>${code}</code>`;
-  });
-
   // Horizontal rules (must come before bold/italic to avoid * conflicts)
   s = s.replace(/^(?:---|\*\*\*|___)\s*$/gm, '<hr>');
 
@@ -756,6 +770,14 @@ export function mdToHtml(src, opts) {
     s = s.replace(`___CODE_BLOCK_${index}___`, block);
   });
 
+  // Restore inline code spans last, so placeholders carried inside restored
+  // <a>/allowed-HTML blocks are resolved too. The function replacer keeps the
+  // escaped code literal — e.g. a shell snippet like `echo $1` is not treated
+  // as a regex back-reference.
+  inlineCodeBlocks.forEach((block, index) => {
+    s = s.replace(`___INLINE_CODE_${index}___`, () => block);
+  });
+
   return _useSvgEmoji() ? svgifyEmoji(s, opts) : s;
 }
 
@@ -808,6 +830,7 @@ export function renderMermaid(container) {
 const markdownModule = {
   escapeHtml,
   mdToHtml,
+  sanitizeAllowedHtml,
   squashOutsideCode,
   renderContent,
   processWithThinking,
@@ -865,7 +888,7 @@ function _setThinkingExpanded(content, toggle, header, expanded) {
   const label_el = header?.querySelector('.thinking-header-left span');
   if (label_el) {
     const label = label_el.dataset.label || 'thinking process';
-    label_el.textContent = expanded ? `Hide ${label}` : `View ${label}`;
+    label_el.textContent = expanded ? t('markdown.hide') + ' ' + label : t('markdown.view') + ' ' + label;
   }
 }
 
@@ -937,9 +960,9 @@ document.addEventListener('click', function(e) {
 function _endpointNameFromUrl(url) {
   try {
     const parsed = new URL(url, window.location.origin);
-    return parsed.host || parsed.hostname || 'Model endpoint';
+    return parsed.host || parsed.hostname || t('markdown.model_endpoint');
   } catch (_) {
-    return 'Model endpoint';
+    return t('markdown.model_endpoint');
   }
 }
 
@@ -959,8 +982,8 @@ function _appendEndpointAddButtons(root) {
     btn.type = 'button';
     btn.className = 'model-endpoint-add-btn';
     btn.dataset.endpointUrl = new URL(href, window.location.origin).href.replace(/\/+$/, '');
-    btn.title = 'Add this OpenAI-compatible endpoint to the model picker';
-    btn.innerHTML = '<span aria-hidden="true">+</span><span>Add to model picker</span>';
+    btn.title = t('markdown.add_endpoint_title');
+    btn.innerHTML = '<span aria-hidden="true">+</span><span>' + t('markdown.add_to_picker') + '</span>';
     anchor.insertAdjacentElement('afterend', btn);
   }
 }
@@ -970,7 +993,7 @@ async function _registerEndpointFromButton(btn) {
   if (!baseUrl || !_isModelEndpointUrl(baseUrl)) return;
   const original = btn.innerHTML;
   btn.disabled = true;
-  btn.innerHTML = '<span aria-hidden="true">...</span><span>Adding</span>';
+  btn.innerHTML = '<span aria-hidden="true">...</span><span>' + t('markdown.adding') + '</span>';
   try {
     const existingRes = await fetch('/api/model-endpoints', { credentials: 'same-origin' });
     if (existingRes.ok) {
@@ -980,11 +1003,11 @@ async function _registerEndpointFromButton(btn) {
         : null;
       if (existing) {
         btn.classList.add('added');
-        btn.innerHTML = '<span aria-hidden="true">✓</span><span>Already added</span>';
+        btn.innerHTML = '<span aria-hidden="true">✓</span><span>' + t('markdown.already_added') + '</span>';
         window.dispatchEvent(new CustomEvent('ge:model-endpoints-updated', { detail: { baseUrl } }));
         if (window.modelsModule?.refreshModels) window.modelsModule.refreshModels(true);
         if (window.sessionModule?.updateModelPicker) window.sessionModule.updateModelPicker();
-        uiModule.showToast?.(`Already in model picker: ${existing.name || _endpointNameFromUrl(baseUrl)}`);
+        uiModule.showToast?.(t('markdown.already_in_picker', { name: existing.name || _endpointNameFromUrl(baseUrl) }));
         return;
       }
     }
@@ -1009,15 +1032,15 @@ async function _registerEndpointFromButton(btn) {
       throw new Error(`HTTP ${res.status}${body ? ': ' + body.slice(0, 160) : ''}`);
     }
     btn.classList.add('added');
-    btn.innerHTML = '<span aria-hidden="true">✓</span><span>Added</span>';
+    btn.innerHTML = '<span aria-hidden="true">✓</span><span>' + t('markdown.added') + '</span>';
     window.dispatchEvent(new CustomEvent('ge:model-endpoints-updated', { detail: { baseUrl } }));
     if (window.modelsModule?.refreshModels) await window.modelsModule.refreshModels(true);
     if (window.sessionModule?.updateModelPicker) window.sessionModule.updateModelPicker();
-    uiModule.showToast?.(`Model endpoint added: ${_endpointNameFromUrl(baseUrl)}`);
+    uiModule.showToast?.(t('markdown.endpoint_added', { name: _endpointNameFromUrl(baseUrl) }));
   } catch (err) {
     btn.disabled = false;
     btn.innerHTML = original;
-    uiModule.showError?.(`Add endpoint failed: ${err.message || err}`);
+    uiModule.showError?.(t('markdown.add_endpoint_failed', { msg: err.message || err }));
   }
 }
 

@@ -1,0 +1,6 @@
+{
+  "connection": {
+    "successful": "Conexión exitosa",
+    "failed": "Conexión fallida: {{error}}"
+  }
+}

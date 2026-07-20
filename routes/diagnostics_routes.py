@@ -6,6 +6,7 @@ from typing import Dict, Any
 
 from fastapi import APIRouter, HTTPException, Form, Request
 
+from core.translations import t
 from services.youtube.youtube_handler import extract_youtube_id, extract_transcript_async
 from core.constants import DEFAULT_HOST, DATA_DIR
 from core.middleware import require_admin
@@ -51,7 +52,7 @@ def setup_diagnostics_routes(
             }
         except Exception as e:
             logger.error(f"Diagnostics logs retrieval error: {e}")
-            raise HTTPException(500, f"Failed to retrieve logs: {str(e)}")
+            raise HTTPException(500, t("diagnostics.logs_failed").format(error=str(e)))
 
     @router.get("/api/db/stats")
     async def get_database_stats(request: Request) -> Dict[str, Any]:
@@ -61,7 +62,7 @@ def setup_diagnostics_routes(
             return get_detailed_stats()
         except Exception as e:
             logger.error(f"DB stats error: {e}")
-            raise HTTPException(500, "Failed to retrieve database statistics")
+            raise HTTPException(500, t("diagnostics.db_stats_failed"))
 
     @router.get("/api/rag/stats")
     async def get_rag_stats(request: Request) -> Dict[str, Any]:

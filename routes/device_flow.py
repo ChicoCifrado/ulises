@@ -12,6 +12,7 @@ from typing import Any, Callable, Iterable, Mapping, Optional
 from fastapi import APIRouter, Form, HTTPException, Request
 
 from core.middleware import require_admin
+from core.translations import t
 
 
 @dataclass(frozen=True)
@@ -161,7 +162,7 @@ def create_device_flow_router(
         require_admin(request)
         payload = store.get_payload(poll_id)
         if payload is None:
-            raise HTTPException(404, "Unknown or expired login session")
+            raise HTTPException(404, t("device_flow.unknown_session"))
         if store.is_throttled(poll_id):
             return {"status": "pending"}
 

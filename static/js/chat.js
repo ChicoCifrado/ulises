@@ -5,6 +5,7 @@
  */
 // ES6 module — IIFE removed
 
+import { t } from './i18n.js';
 import Storage from './storage.js';
 import uiModule from './ui.js';
 import sessionModule from './sessions.js';
@@ -12,7 +13,6 @@ import chatRenderer from './chatRenderer.js';
 import chatStream from './chatStream.js';
 import { addAITTSButton } from './tts-ai.js';
 import markdownModule from './markdown.js';
-import { svgifyEmoji } from './markdown.js';
 import spinnerModule from './spinner.js';
 import presetsModule from './presets.js';
 import fileHandlerModule from './fileHandler.js';
@@ -44,6 +44,14 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
   let _sendInFlight = false;   // covers the window from click → streaming start
   let _displayOverride = null; // Override visible user bubble text (hides injected prompts)
   let _hideUserBubble = false; // Skip user bubble entirely (e.g. continue after stop)
+
+  function _setForegroundChatBusy(active) {
+    try {
+      window.__odysseusChatBusy = !!active;
+      window.__odysseusChatBusyUntil = active ? Date.now() + 120000 : Date.now() + 1200;
+      window.dispatchEvent(new CustomEvent('odysseus:chat-busy-change', { detail: { active: !!active } }));
+    } catch (_) {}
+  }
   let _pendingContinue = null; // Stores the stopped AI element to merge with new response
   // ── Auto-recovery: when a turn's stream silently dies (connection drop) or
   // goes quiet while the connection is alive, re-engage the model with a
@@ -110,6 +118,8 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
   let _streamSessionId = null; // Session ID for the currently active reader loop
   let _lastReaderActivity = 0; // Timestamp of last reader.read() success — used to detect frozen streams
   let _webLockRelease = null;  // Function to release the Web Lock held during streaming
+  let _staleStreamProbeInFlight = false;
+  const STALE_LOCAL_STREAM_MS = 15000;
 
   /** Check if an SSE reader is still actively connected for a session. */
   function hasActiveStream(sessionId) {
@@ -232,7 +242,12 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
       // arrow out for the stop icon — otherwise the swap happens mid-flight
       // and the user sees nothing fly out.
       setTimeout(() => {
-        submitBtn.innerHTML = _stopSvg;
+        if (submitBtn.dataset.mode !== 'streaming') return;
+        const msgInput = uiModule.el('message');
+        const hasQueuedText = !!(msgInput && msgInput.value && msgInput.value.trim());
+        submitBtn.innerHTML = hasQueuedText && icons ? icons.send : _stopSvg;
+        submitBtn.dataset.phase = hasQueuedText ? 'queue' : 'processing';
+        submitBtn.title = hasQueuedText ? 'Queue message' : 'Stop generation';
         submitBtn.classList.remove('anim-launch');
         void submitBtn.offsetWidth;
         submitBtn.classList.add('anim-land');
@@ -268,6 +283,143 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
   // API key pattern for the guard in handleChatSubmit
   const API_KEY_RE = /^(sk-[a-zA-Z0-9_\-]{20,}|gsk_[a-zA-Z0-9]{20,}|AIza[a-zA-Z0-9_\-]{30,}|xai-[a-zA-Z0-9]{20,})$/;
 
+  const _queuedAgentRequests = [];
+  let _queuedDrainTimer = null;
+  let _queuedPromoteTimer = null;
+  let _queuedRequestSeq = 0;
+  let _queuedBubbleHost = null;
+
+  function _escapeQueueText(s) {
+    return String(s || '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
+  function _ensureQueuedBubbleHost() {
+    const chatBox = document.getElementById('chat-history');
+    if (!chatBox) return null;
+    if (_queuedBubbleHost && _queuedBubbleHost.isConnected) return _queuedBubbleHost;
+    let host = document.getElementById('chat-queued-bubble-host');
+    if (!host) {
+      host = document.createElement('div');
+      host.id = 'chat-queued-bubble-host';
+      host.className = 'chat-queued-bubble-host';
+    }
+    chatBox.appendChild(host);
+    _queuedBubbleHost = host;
+    return host;
+  }
+
+  function _createQueuedBubble(item) {
+    const host = _ensureQueuedBubbleHost();
+    if (!host) return null;
+    const wrap = document.createElement('div');
+    wrap.className = 'msg msg-user msg-user-queued';
+    wrap.dataset.queueId = item.id;
+    wrap.title = 'Queued - click to send now and stop the current response';
+    wrap.innerHTML = `<div class="role">You <span class="queued-pill"><svg width="8" height="8" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="6 4 20 12 6 20 6 4"></polygon></svg>Queued</span></div><div class="body">${_escapeQueueText(item.message)}</div>`;
+    wrap.addEventListener('click', (ev) => {
+      if (ev.target && ev.target.closest && ev.target.closest('button, a, textarea, input')) return;
+      _promoteQueuedRequest(item.id);
+    });
+    host.appendChild(wrap);
+    uiModule.scrollHistory();
+    return wrap;
+  }
+
+  function _removeQueuedRequest(id) {
+    const idx = _queuedAgentRequests.findIndex(item => item.id === id);
+    if (idx < 0) return null;
+    const [item] = _queuedAgentRequests.splice(idx, 1);
+    if (item && item.el && item.el.parentNode) item.el.remove();
+    return item;
+  }
+
+  function _setComposerAndSend(message) {
+    const input = uiModule.el('message');
+    if (!input) return false;
+    input.value = message;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    if (uiModule.autoResize) uiModule.autoResize(input);
+    setTimeout(() => {
+      handleChatSubmit({ preventDefault() {} }).catch(err => {
+        console.error('queued send failed', err);
+        try { uiModule.showError && uiModule.showError('Queued send failed: ' + (err?.message || err)); } catch (_) {}
+      });
+    }, 0);
+    return true;
+  }
+
+  function _sendQueuedWhenIdle(item) {
+    if (!item) return;
+    const trySend = () => {
+      if (isStreaming || _sendInFlight) {
+        _queuedPromoteTimer = setTimeout(trySend, 220);
+        return;
+      }
+      _queuedPromoteTimer = null;
+      _setComposerAndSend(item.message);
+    };
+    if (_queuedPromoteTimer) clearTimeout(_queuedPromoteTimer);
+    _queuedPromoteTimer = setTimeout(trySend, 320);
+  }
+
+  function _promoteQueuedRequest(id) {
+    const item = _removeQueuedRequest(id);
+    if (!item) return;
+    if (!isStreaming && !_sendInFlight) {
+      _setComposerAndSend(item.message);
+      return;
+    }
+    try { uiModule.showToast && uiModule.showToast('Sending queued request now'); } catch (_) {}
+    const input = uiModule.el('message');
+    const submitBtn = document.querySelector('.send-btn');
+    if (input) {
+      input.value = '';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    if (submitBtn) submitBtn.click();
+    _sendQueuedWhenIdle(item);
+  }
+
+  function _queueAgentRequest(message) {
+    const msg = String(message || '').trim();
+    if (!msg) return false;
+    const item = { id: `q${++_queuedRequestSeq}`, message: msg, createdAt: Date.now(), el: null };
+    item.el = _createQueuedBubble(item);
+    _queuedAgentRequests.push(item);
+    try { uiModule.showToast && uiModule.showToast(_queuedAgentRequests.length === 1 ? 'Queued for after this response' : `${_queuedAgentRequests.length} requests queued`); } catch (_) {}
+    return true;
+  }
+
+  export function queueStreamingComposerRequest() {
+    if (!isStreaming) return false;
+    const queuedInput = uiModule.el('message');
+    const queuedText = (queuedInput && queuedInput.value || '').trim();
+    if (!queuedText) return false;
+    if (fileHandlerModule.getPendingCount && fileHandlerModule.getPendingCount()) {
+      try { uiModule.showError && uiModule.showError('Finish the current response before queueing messages with attachments.'); } catch (_) {}
+      return true;
+    }
+    if (_queueAgentRequest(queuedText)) {
+      queuedInput.value = '';
+      queuedInput.dispatchEvent(new Event('input', { bubbles: true }));
+      if (uiModule.autoResize) uiModule.autoResize(queuedInput);
+      try { window._updateSendBtnIcon && window._updateSendBtnIcon(); } catch (_) {}
+    }
+    return true;
+  }
+
+  function _drainQueuedAgentRequests() {
+    if (isStreaming || _sendInFlight || !_queuedAgentRequests.length) return;
+    if (_queuedDrainTimer) return;
+    _queuedDrainTimer = setTimeout(() => {
+      _queuedDrainTimer = null;
+      if (isStreaming || _sendInFlight || !_queuedAgentRequests.length) return;
+      const next = _queuedAgentRequests[0];
+      if (!next) return;
+      _removeQueuedRequest(next.id);
+      _setComposerAndSend(next.message);
+    }, 180);
+  }
 
   /**
    * Handle chat form submission
@@ -291,8 +443,18 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
       return;
     }
 
-    // If currently streaming, stop it
+    // If currently streaming, keyboard Enter can queue a non-empty composer.
+    // Clicking the stop icon should still stop normally, even if text exists.
     if (isStreaming) {
+      const queueRequestedAt = Number(window.__odysseusQueueStreamingSubmit || 0);
+      const shouldQueueStreamingSubmit = queueRequestedAt && Date.now() - queueRequestedAt < 1200;
+      window.__odysseusQueueStreamingSubmit = 0;
+      if (shouldQueueStreamingSubmit && queueStreamingComposerRequest()) {
+        return;
+      }
+      if (fileHandlerModule.isUploading && fileHandlerModule.isUploading()) {
+        fileHandlerModule.cancelUpload && fileHandlerModule.cancelUpload();
+      }
       // Cancel server-side research if in progress
       const _cancelSid = sessionModule.getCurrentSessionId();
       if (_cancelSid && _researchingStreamIds.has(_cancelSid)) {
@@ -687,6 +849,15 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
         ids = await fileHandlerModule.uploadPending();
       } catch(e) {
         console.error('upload failed', e);
+      }
+      if (_pendingAttachInfo && !ids.length && !(_pendingRegenAttachments && _pendingRegenAttachments.length)) {
+        if (_userMsgEl && _userMsgEl.parentNode) _userMsgEl.remove();
+        if (fileHandlerModule.wasLastUploadCancelled && !fileHandlerModule.wasLastUploadCancelled()) {
+          uiModule.showError && uiModule.showError('Upload failed. Attachment kept so you can retry.');
+        }
+        updateSubmitButton('idle', submitBtn);
+        _releaseSendFlag();
+        return;
       }
 
       // Carry over the original message's file-ids on a regenerate so the new
@@ -1862,7 +2033,7 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
                 if (!_isBg) {
                   var _selM = _shortModel(json.selected_model || '');
                   var _ansM = _shortModel(json.answered_by || '');
-                  uiModule.showToast('⚠ ' + _selM + ' failed — answered by ' + _ansM, 6000);
+                  uiModule.showToast(t('chat.model_failed_fallback', { failed: _selM, fallback: _ansM }), 6000);
                   if (holder) {
                     var _rEl = holder.querySelector('.role');
                     if (_rEl) {
@@ -2003,7 +2174,7 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
                 holder._memoriesUsed = json.data;
               } else if (json.type === 'compacted') {
                 if (!_isBg) {
-                  uiModule.showToast('Context compacted — older messages summarized');
+                  uiModule.showToast(t('chat.context_compacted'));
                 }
               } else if (json.type === 'metrics') {
                 metrics = json.data;
@@ -2270,6 +2441,25 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
                 if (json.ui_event) {
                   chatStream.handleUIControl(json);
                 }
+                // Native document tool calls can arrive as a completed
+                // tool_output without the text-fence streaming path. Open the
+                // document editor from the real doc metadata carried on the
+                // tool result so "create a document" never leaves only a chat
+                // link behind if the later doc_update event is missed.
+                if (
+                  documentModule
+                  && json.doc_id
+                  && ['create_document', 'update_document', 'edit_document'].includes(json.tool)
+                ) {
+                  documentModule.handleDocUpdate({
+                    type: 'doc_update',
+                    doc_id: json.doc_id,
+                    title: json.document_title || '',
+                    language: json.document_language || '',
+                    version: json.document_version || 1,
+                    content: json.document_content || '',
+                  });
+                }
 
                 // Schedule a thinking spinner between tool rounds (short delay so
                 // agent_step in the same SSE chunk can cancel it before it shows)
@@ -2321,148 +2511,11 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
               } else if (json.type === 'ask_user') {
                 if (_isBg) continue;
                 // The agent posed a multiple-choice question; the turn has ended.
-                // Render clickable options at the bottom of the history. The
-                // user's pick is sent as the next message and the agent resumes.
+                // Use the shared history renderer so the live and restored
+                // versions have identical behavior.
                 _cancelThinkingTimer();
                 _removeThinkingSpinner();
-                const _aq = json.data || {};
-                const _opts = Array.isArray(_aq.options) ? _aq.options : [];
-                if (_aq.question && _opts.length) {
-                  const chatBox = document.getElementById('chat-history');
-                  // Drop any prior unanswered card so only the latest shows.
-                  chatBox.querySelectorAll('.ask-user-card').forEach(n => n.remove());
-                  const card = document.createElement('div');
-                  card.className = 'ask-user-card';
-                  const multi = !!_aq.multi;
-                  // Group the choices for assistive tech and label the group with
-                  // the question (set below); make the card focusable so it can be
-                  // moved to when it appears.
-                  card.setAttribute('role', 'group');
-                  card.tabIndex = -1;
-                  // Render any emoji in agent-supplied text through the app's
-                  // pipeline: escape, then svgify to monochrome theme-tinted
-                  // glyphs (project rule: never colorful emoji; respects the
-                  // "Text-only Emojis" setting like the rest of the chat).
-                  const _emo = (s) => svgifyEmoji(uiModule.esc(String(s)));
-
-                  // Header row holds the close (×) to dismiss the affordances and
-                  // just type a reply instead.
-                  const head = document.createElement('div');
-                  head.className = 'ask-user-head';
-                  const closeBtn = document.createElement('button');
-                  closeBtn.type = 'button';
-                  closeBtn.className = 'modal-close ask-user-close';
-                  closeBtn.setAttribute('aria-label', 'Dismiss question');
-                  closeBtn.textContent = '×';
-                  closeBtn.addEventListener('click', () => {
-                    card.remove();
-                    const mi = uiModule.el('message');
-                    if (mi) mi.focus();
-                  });
-                  head.appendChild(closeBtn);
-                  card.appendChild(head);
-
-                  // Render the question inside the card so it's self-contained:
-                  // some models call ask_user without first narrating the question
-                  // as assistant text, in which case the card would otherwise show
-                  // bare options with no prompt.
-                  if (_aq.question) {
-                    const q = document.createElement('div');
-                    q.className = 'ask-user-question';
-                    q.id = `ask-user-q-${Date.now()}-${Math.floor(Math.random() * 1e4)}`;
-                    q.innerHTML = _emo(_aq.question);
-                    card.appendChild(q);
-                    // Label the choice group with the question for screen readers.
-                    card.setAttribute('aria-labelledby', q.id);
-                  } else {
-                    card.setAttribute('aria-label', 'Question from the assistant');
-                  }
-
-                  const list = document.createElement('div');
-                  list.className = 'ask-user-options';
-                  card.appendChild(list);
-
-                  const _send = (text) => {
-                    if (!text) return;
-                    // Remove the card once answered — the choice is sent as a
-                    // normal user message (and the question persists as the
-                    // assistant text above), so the affordances are spent.
-                    card.remove();
-                    const mi = uiModule.el('message');
-                    if (mi) mi.value = text;
-                    const sb = document.querySelector('.send-btn');
-                    if (sb) sb.click();
-                  };
-
-                  _opts.forEach((opt, i) => {
-                    const label = (opt && opt.label) ? String(opt.label) : String(opt || '');
-                    if (!label) return;
-                    const descr = (opt && opt.description) ? String(opt.description) : '';
-                    const row = document.createElement(multi ? 'label' : 'button');
-                    row.className = 'ask-user-option';
-                    if (multi) {
-                      const cb = document.createElement('input');
-                      cb.type = 'checkbox';
-                      cb.value = label;
-                      row.appendChild(cb);
-                    }
-                    const txt = document.createElement('span');
-                    txt.className = 'ask-user-option-label';
-                    txt.innerHTML = _emo(label);
-                    row.appendChild(txt);
-                    if (descr) {
-                      const d = document.createElement('span');
-                      d.className = 'ask-user-option-desc';
-                      d.innerHTML = _emo(descr);
-                      row.appendChild(d);
-                    }
-                    if (!multi) {
-                      row.type = 'button';
-                      row.addEventListener('click', () => _send(label));
-                    }
-                    list.appendChild(row);
-                  });
-
-                  // Free-text "Other" — type a custom answer + send (Enter or →).
-                  const other = document.createElement('div');
-                  other.className = 'ask-user-other';
-                  const otherInput = document.createElement('input');
-                  otherInput.type = 'text';
-                  otherInput.className = 'styled-prompt-input ask-user-other-input';
-                  otherInput.placeholder = multi ? 'Other (added to selection)…' : 'Other… (type your own answer)';
-                  otherInput.setAttribute('aria-label', multi ? 'Add a custom option' : 'Type a custom answer');
-                  const otherSend = document.createElement('button');
-                  otherSend.type = 'button';
-                  otherSend.className = 'confirm-btn confirm-btn-primary ask-user-other-send';
-                  otherSend.setAttribute('aria-label', 'Send answer');
-                  otherSend.textContent = multi ? 'Send selection' : 'Send';
-                  const _submit = () => {
-                    const free = otherInput.value.trim();
-                    if (multi) {
-                      const picked = Array.from(card.querySelectorAll('.ask-user-option input:checked')).map(c => c.value);
-                      if (free) picked.push(free);
-                      if (picked.length) _send(picked.join(', '));
-                    } else if (free) {
-                      _send(free);
-                    }
-                  };
-                  otherSend.addEventListener('click', _submit);
-                  otherInput.addEventListener('keydown', (e) => {
-                    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
-                      e.preventDefault();
-                      _submit();
-                    }
-                  });
-                  other.appendChild(otherInput);
-                  other.appendChild(otherSend);
-                  card.appendChild(other);
-
-                  chatBox.appendChild(card);
-                  card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                  // Move focus to the card so keyboard/screen-reader users land on
-                  // the question + choices when it appears.
-                  try { card.focus(); } catch (_) {}
-                }
+                chatRenderer.renderAskUserCard(json.data || {});
 
               } else if (json.type === 'plan_update') {
                 if (_isBg) continue;
@@ -2937,6 +2990,21 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
             return;
           }
 
+          if (abortReason === 'stale-local') {
+            const staleMsg = 'Stream connection ended. Composer unlocked; send again if needed.';
+            if (holder && !accumulated) {
+              holder.querySelector('.body').innerHTML =
+                `<div style="opacity:0.7;font-style:italic;padding:4px 0;">[${staleMsg}]</div>`;
+            } else if (holder && accumulated) {
+              const staleNote = document.createElement('div');
+              staleNote.className = 'stopped-indicator';
+              staleNote.innerHTML = `<span style="opacity:0.7;">[${staleMsg}]</span>`;
+              holder.querySelector('.body').appendChild(staleNote);
+            }
+            currentAbort = null;
+            return;
+          }
+
           // User-initiated stop (or browser navigation abort).
           // Stopped before any text arrived — keep the bubble as a
           // "Cancelled by user" record (so it survives a refresh).
@@ -3242,12 +3310,51 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
     box.appendChild(bar);
     if (uiModule.scrollHistory) uiModule.scrollHistory();
   }
+  async function _probeStaleLocalStream() {
+    if (!isStreaming || _staleStreamProbeInFlight) return;
+    if (Date.now() - _lastReaderActivity < STALE_LOCAL_STREAM_MS) return;
+    const sid = _streamSessionId || (sessionModule.getCurrentSessionId && sessionModule.getCurrentSessionId());
+    if (!sid) return;
+    if (_backgroundStreams.has(sid) || (sessionModule.getCurrentSessionId && sessionModule.getCurrentSessionId() !== sid)) return;
+    _staleStreamProbeInFlight = true;
+    try {
+      const res = await fetch(`${API_BASE}/api/chat/stream_status/${encodeURIComponent(sid)}`, {
+        credentials: 'same-origin',
+        cache: 'no-store',
+      });
+      if (!isStreaming || _backgroundStreams.has(sid)) return;
+      if (res.status !== 404) return;
+
+      console.warn('[stream-watchdog] Local stream was stale and server has no active stream. Unlocking composer.');
+      if (currentAbort && !currentAbort.signal.aborted) {
+        currentAbort._reason = 'stale-local';
+        currentAbort.abort();
+      }
+      isStreaming = false;
+      _setForegroundChatBusy(false);
+      _sendInFlight = false;
+      if (_webLockRelease) {
+        _webLockRelease();
+        _webLockRelease = null;
+      }
+      const submitBtn = document.querySelector('.send-btn');
+      if (submitBtn) updateSubmitButton('idle', submitBtn);
+      const messageInput = uiModule.el('message');
+      if (messageInput) messageInput.disabled = false;
+      _drainQueuedAgentRequests();
+    } catch (err) {
+      console.warn('[stream-watchdog] Stream status probe failed:', err);
+    } finally {
+      _staleStreamProbeInFlight = false;
+    }
+  }
+
   function _startStallWatchdog() {
-    // Disabled: the server-side stall detector / auto-continue (agent
-    // loop-breaker) handles quiet/stalled streams now, so the manual
-    // "Quiet for Nm — still working?" banner is redundant (and annoying).
+    // Keep the old noisy stall banner disabled. This watchdog only unlocks
+    // a dead local stream after the backend confirms no active stream exists.
     if (_stallWatchdog) { clearInterval(_stallWatchdog); _stallWatchdog = null; }
     _removeStallBanner();
+    _stallWatchdog = setInterval(_probeStaleLocalStream, 5000);
   }
   function _stopStallWatchdog() {
     if (_stallWatchdog) { clearInterval(_stallWatchdog); _stallWatchdog = null; }
@@ -4259,7 +4366,7 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
 
       await sessionModule.loadSessions();
       await sessionModule.selectSession(data.id);
-      if (uiModule) uiModule.showToast(`Forked → ${data.name}`);
+      if (uiModule) uiModule.showToast(t('chat.forked', { name: data.name }));
     } catch (err) {
       console.error('Fork failed:', err);
       if (uiModule) uiModule.showError('Fork failed: ' + err.message);
@@ -4275,7 +4382,10 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
     if (!sessionId) return;
     try {
       const res = await fetch(`${API_BASE}/api/research/status/${sessionId}`);
-      if (!res.ok) return; // 404 = no research for this session
+      if (!res.ok) {
+        if (sessionModule && sessionModule.clearResearching) sessionModule.clearResearching(sessionId);
+        return; // 404 = no research for this session
+      }
       const data = await res.json();
 
       if (data.status === 'done') {
@@ -4606,7 +4716,7 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
       // error output shown before a model was selected, #1428). Just remove the
       // DOM so the "x" works regardless.
       domToRemove.forEach(el => el.remove());
-      if (uiModule) uiModule.showToast('Message deleted');
+      if (uiModule) uiModule.showToast(t('chat.message_deleted'));
       return;
     }
 
@@ -4618,7 +4728,7 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
       });
       if (!res.ok) throw new Error('Server error ' + res.status);
       domToRemove.forEach(el => el.remove());
-      if (uiModule) uiModule.showToast('Message deleted');
+      if (uiModule) uiModule.showToast(t('chat.message_deleted'));
     } catch (err) {
       console.error('Delete failed:', err);
       if (uiModule) uiModule.showError('Delete failed: ' + err.message);
@@ -4703,7 +4813,7 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
         }
 
         cleanup();
-        if (uiModule) uiModule.showToast('Message edited');
+        if (uiModule) uiModule.showToast(t('chat.message_edited'));
       } catch (err) {
         console.error('Edit failed:', err);
         if (uiModule) uiModule.showError('Edit failed: ' + err.message);
@@ -5019,7 +5129,16 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
       if (!header) return;
       const node = header.closest('.agent-thread-node');
       if (!node) return;
-      node.classList.toggle('open');
+      const opened = node.classList.toggle('open');
+      if (opened) {
+        // Expanding the final tool trace can push a pending ask_user card below
+        // the viewport.  Keep that immediately-adjacent prompt visible.
+        const thread = node.closest('.agent-thread');
+        const pendingCard = thread?.nextElementSibling;
+        if (pendingCard?.classList.contains('ask-user-card')) {
+          requestAnimationFrame(() => pendingCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' }));
+        }
+      }
     });
     window.__ulises_thread_click_bound = true;
   }

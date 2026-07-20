@@ -16,6 +16,7 @@ import shutil
 from fastapi import APIRouter, HTTPException, Request
 
 from core.middleware import require_admin
+from core.translations import t
 from core.database import (
     SessionLocal,
     Session as DbSession,
@@ -163,13 +164,13 @@ def setup_admin_wipe_routes(session_manager):
                 db.commit()
                 return {"status": "deleted", "kind": kind, "count": count}
 
-            raise HTTPException(400, f"Unknown wipe kind: {kind!r}")
+            raise HTTPException(400, t("wipe.unknown_kind").format(kind=kind))
         except HTTPException:
             raise
         except Exception as e:
             db.rollback()
             logger.exception(f"Wipe {kind} failed")
-            raise HTTPException(500, f"Wipe {kind} failed: {e}")
+            raise HTTPException(500, t("wipe.failed").format(kind=kind, error=e))
         finally:
             db.close()
 

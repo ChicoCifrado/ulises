@@ -36,8 +36,19 @@ from typing import Optional, List
 
 from src.auth_helpers import _auth_disabled, get_current_user
 from src.secret_storage import decrypt as _decrypt
+from core.translations import t
 
 logger = logging.getLogger(__name__)
+
+
+class EmailNotConfiguredError(RuntimeError):
+    """Raised when an IMAP operation is attempted on an account that has no
+    inbox configured (e.g. a send-only / SMTP-only account).
+
+    Subclasses RuntimeError so existing broad ``except Exception`` handlers
+    keep working; callers that want to treat "no inbox" as an empty result
+    rather than a failure can catch this type specifically.
+    """
 
 
 def _xoauth2_raw(user: str, access_token: str) -> str:
@@ -161,7 +172,7 @@ def _send_smtp_message(cfg: dict, from_addr: str, recipients: list[str], message
         if cfg.get("oauth_provider") == "google":
             token = _get_valid_google_token(cfg.get("account_id"), cfg)
             if not token:
-                raise RuntimeError("Google OAuth token unavailable — reconnect the account")
+                raise RuntimeError(t("email.oauth_token_unavailable"))
             smtp.ehlo()
             smtp.auth("XOAUTH2", lambda challenge=None: _xoauth2_raw(user, token), initial_response_ok=True)
         elif user and password:
@@ -206,10 +217,7 @@ def _friendly_email_auth_error(protocol: str, host: str, error: object) -> str:
     )
     if microsoft_basic_auth_failure:
         return (
-            "Microsoft no longer accepts normal mailbox passwords for "
-            "Outlook/Office 365 IMAP/SMTP in most accounts. Ulises "
-            "does not support Microsoft OAuth/Graph mail yet, so Outlook "
-            "accounts cannot be added with this password form."
+            t("email.microsoft_auth_disabled")
         )
     return raw[:200]
 
@@ -225,8 +233,9 @@ def _strip_think(text: str) -> str:
     """
     if not text:
         return ""
-    from src.text_helpers import strip_think as _central, _THINK_CLOSED_RE, _THINK_OPEN_RE, _THINK_TAG_RE
-    had_think = bool(_THINK_CLOSED_RE.search(text) or _THINK_OPEN_RE.search(text) or _THINK_TAG_RE.search(text))
+    from src.text_helpers import strip_think as _central, _THINK_TAG_RE
+    # Single linear tag check; the old closed/open `.search()` calls could ReDoS.
+    had_think = bool(_THINK_TAG_RE.search(text))
     return _central(text, prose=had_think, prompt_echo=True)
 
 
@@ -294,14 +303,14 @@ def _require_auth(request: Request) -> str:
         return ""
     auth_mgr = getattr(request.app.state, "auth_manager", None)
     if auth_mgr is not None and getattr(auth_mgr, "is_configured", False):
-        raise HTTPException(401, "Not authenticated")
+        raise HTTPException(401, t("email.not_authenticated"))
     # Unconfigured / first-run mode: only allow loopback callers. Public
     # network traffic must authenticate even before auth is set up.
     client = getattr(request, "client", None)
     host = (client.host if client else "") or ""
     if host in ("127.0.0.1", "::1", "localhost"):
         return ""
-    raise HTTPException(401, "Not authenticated")
+    raise HTTPException(401, t("email.not_authenticated"))
 
 
 def require_owner(request: Request, account_id: str | None = Query(None)) -> str:
@@ -337,10 +346,10 @@ def _assert_owns_account(account_id: str, owner: str) -> None:
         try:
             row = db.query(_EA).filter(_EA.id == account_id).first()
             if row is None:
-                raise HTTPException(404, "Account not found")
-            if row.owner and row.owner != owner:
+                raise HTTPException(404, t("email.account_not_found"))
+            if not _account_visible_to_owner(row, owner):
                 # Treat as 404 (not 403) so we don't leak existence.
-                raise HTTPException(404, "Account not found")
+                raise HTTPException(404, t("email.account_not_found"))
         finally:
             db.close()
     except HTTPException:
@@ -349,7 +358,47 @@ def _assert_owns_account(account_id: str, owner: str) -> None:
         # Fail closed — a DB hiccup must not let cross-tenant access slip
         # through. 503 tells the caller to retry; logs preserve detail.
         logger.error(f"Account-owner check failed: {e}")
-        raise HTTPException(503, "Account check failed")
+        raise HTTPException(503, t("email.account_check_failed"))
+
+
+def _account_visible_to_owner(row, owner: str) -> bool:
+    """Whether an authenticated `owner` may act on this EmailAccount row.
+
+    Mirrors the SQL predicate in `_get_email_config`'s
+    `_owner_or_matching_legacy_account`: a caller sees an account they own, or a
+    legacy owner-less account (owner NULL/"") only when its own mailbox
+    (`imap_user` / `from_address`) is the caller's. `email_accounts` is the one
+    owner-scoped table deliberately left out of the legacy-owner migration
+    backfill, so ownerless rows persist on multi-user deploys — making this the
+    gate that keeps one tenant off another's imported mailbox and its decrypted
+    IMAP/SMTP credentials."""
+    row_owner = getattr(row, "owner", None) or ""
+    if row_owner:
+        return row_owner == owner
+    return owner in {
+        getattr(row, "imap_user", None) or "",
+        getattr(row, "from_address", None) or "",
+    }
+
+
+def _account_visible_to_owner(row, owner: str) -> bool:
+    """Whether an authenticated `owner` may act on this EmailAccount row.
+
+    Mirrors the SQL predicate in `_get_email_config`'s
+    `_owner_or_matching_legacy_account`: a caller sees an account they own, or a
+    legacy owner-less account (owner NULL/"") only when its own mailbox
+    (`imap_user` / `from_address`) is the caller's. `email_accounts` is the one
+    owner-scoped table deliberately left out of the legacy-owner migration
+    backfill, so ownerless rows persist on multi-user deploys — making this the
+    gate that keeps one tenant off another's imported mailbox and its decrypted
+    IMAP/SMTP credentials."""
+    row_owner = getattr(row, "owner", None) or ""
+    if row_owner:
+        return row_owner == owner
+    return owner in {
+        getattr(row, "imap_user", None) or "",
+        getattr(row, "from_address", None) or "",
+    }
 
 def _q(name: str) -> str:
     """Quote an IMAP mailbox name. Defensive: escapes `\\` and `"` and wraps
@@ -512,7 +561,7 @@ def attachment_extract_dir(folder: str, uid: str) -> Path:
     target = (ATTACHMENTS_DIR / key).resolve()
     base = ATTACHMENTS_DIR.resolve()
     if target != base and base not in target.parents:
-        raise HTTPException(400, "Invalid attachment location")
+        raise HTTPException(400, t("email.invalid_attachment_location"))
     return target
 
 
@@ -779,12 +828,13 @@ def _get_email_config(account_id: str | None = None, owner: str = "") -> dict:
         try:
             if account_id:
                 row = db.query(_EA).filter(_EA.id == account_id, _EA.enabled == True).first()  # noqa: E712
-                # If the resolved row belongs to a different owner, treat as
+                # If the resolved row isn't visible to this owner, treat as
                 # not-found rather than silently serving it. This is a defense
                 # in depth — `require_owner` already calls `_assert_owns_account`
                 # for query-param account_ids, but other callers (cookbook
-                # rules, scheduled poller) may not.
-                if row is not None and owner and row.owner and row.owner != owner:
+                # rules, scheduled poller) may not. Ownerless legacy rows are
+                # only visible on a mailbox match, same as the fallback below.
+                if row is not None and owner and not _account_visible_to_owner(row, owner):
                     row = None
             # Fallback path — restrict to this owner's accounts so we don't
             # leak another user's default mailbox to an unconfigured user.
@@ -928,6 +978,14 @@ def _imap_connect(account_id: str | None = None, owner: str = "",
     # `timeout` is overridable so short-lived callers (e.g. the service-health
     # probe) can impose a tighter budget than the default IMAP timeout.
     cfg = _get_email_config(account_id, owner=owner)
+    # Send-only (SMTP-only) account: no IMAP host means there is no inbox to
+    # read. Bail out with a clear, typed error instead of handing an empty
+    # host to imaplib — IMAP4("", 993) silently dials localhost:993 and fails
+    # with a confusing "[Errno 111] Connection refused" on every inbox poll.
+    if not cfg.get("imap_host"):
+        raise EmailNotConfiguredError(
+            f"IMAP is not configured for account {cfg.get('account_name') or 'default'!r}"
+        )
     # Connection mode:
     #   STARTTLS on → plain + upgrade
     #   STARTTLS off + port 993 → implicit SSL (IMAPS)
@@ -945,7 +1003,7 @@ def _imap_connect(account_id: str | None = None, owner: str = "",
         if cfg.get("oauth_provider") == "google":
             token = _get_valid_google_token(cfg.get("account_id"), cfg)
             if not token:
-                raise RuntimeError("Google OAuth token unavailable — reconnect the account in Settings → Integrations")
+                raise RuntimeError(t("email.oauth_token_unavailable_imap"))
             conn.authenticate("XOAUTH2", lambda x: _xoauth2_bytes(cfg["imap_user"], token))
         else:
             conn.login(cfg["imap_user"], cfg["imap_password"])
@@ -1141,10 +1199,15 @@ def _imap_move(uid, dest, src="INBOX", account_id: str | None = None, owner: str
     try:
         c = _imap_connect(account_id, owner=owner)
         c.select(_q(src))
-        status, _ = c.copy(uid, _q(dest))
+        # Callers pass a real IMAP UID (from conn.uid("SEARCH", ...)). copy()
+        # and store() operate on message SEQUENCE NUMBERS, so addressing them
+        # with a UID moved/deleted the wrong message (or silently no-oped when
+        # the UID exceeded the message count). Use the UID commands, matching
+        # the move/delete path in email_routes.py.
+        status, _ = c.uid("COPY", uid, _q(dest))
         if status != "OK":
             return False
-        c.store(uid, "+FLAGS", "\\Deleted")
+        c.uid("STORE", uid, "+FLAGS", "\\Deleted")
         c.expunge()
         return True
     except Exception as e:

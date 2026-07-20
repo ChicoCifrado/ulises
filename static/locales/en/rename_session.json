@@ -1,0 +1,14 @@
+{
+  "rename_session": {
+    "aria_label": "Rename session",
+    "title": "Rename Session",
+    "close_aria": "Close rename session modal",
+    "label": "Session Name",
+    "placeholder": "Enter session name",
+    "cancel": "Cancel",
+    "save": "Save",
+    "errors": {
+      "failed": "Failed to rename session"
+    }
+  }
+}

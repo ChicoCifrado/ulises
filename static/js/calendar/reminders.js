@@ -9,9 +9,9 @@
 // `start()` kicks off the poll loop + permission request. Call once from
 // the calendar's entry module.
 
+import { t } from '../i18n.js';
 import uiModule from '../ui.js';
-
-const API_BASE = window.location.origin;
+import { API_BASE } from '../apiBase.js';
 
 let _notifFired = new Set(JSON.parse(localStorage.getItem('cal-notif-fired') || '[]'));
 
@@ -80,18 +80,18 @@ async function _pollReminders() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           note_id: note.id,
-          title: note.title || 'Calendar Reminder',
+          title: note.title || t('calendar.reminder_title'),
           body,
         }),
       }).catch(() => {});
       if ('Notification' in window && Notification.permission === 'granted') {
-        new Notification(note.title || 'Calendar Reminder', {
+        new Notification(note.title || t('calendar.reminder_title'), {
           body,
           icon: '/static/favicon.png',
           tag: `cal-remind-${note.id}`,
         });
       }
-      if (uiModule.showToast) uiModule.showToast((note.title || 'Calendar Reminder') + (body ? ' — ' + body : ''));
+      if (uiModule.showToast) uiModule.showToast((note.title || t('calendar.reminder_title')) + (body ? ' — ' + body : ''));
     }
     // Persist fired set (keep last 200)
     const arr = [..._notifFired].slice(-200);

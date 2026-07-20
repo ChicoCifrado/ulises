@@ -6,6 +6,7 @@ from typing import Optional
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request, Form
+from core.translations import t
 from pydantic import BaseModel, Field
 
 from core.database import SessionLocal, Webhook, ModelEndpoint
@@ -103,7 +104,7 @@ def setup_webhook_routes(
         _require_admin(request)
         name = name.strip()[:MAX_NAME_LEN]
         if not name:
-            raise HTTPException(400, "Webhook name is required")
+            raise HTTPException(400, t("webhook.name_required"))
         try:
             url = validate_webhook_url(url)
         except ValueError as e:
@@ -145,7 +146,7 @@ def setup_webhook_routes(
         try:
             wh = db.query(Webhook).filter(Webhook.id == webhook_id).first()
             if not wh:
-                raise HTTPException(404, "Webhook not found")
+                raise HTTPException(404, t("webhook.not_found"))
             url, secret = wh.url, wh.secret
         finally:
             db.close()
@@ -160,7 +161,7 @@ def setup_webhook_routes(
         try:
             wh = db.query(Webhook).filter(Webhook.id == webhook_id).first()
             if not wh:
-                raise HTTPException(404, "Webhook not found")
+                raise HTTPException(404, t("webhook.not_found"))
             wh.is_active = not wh.is_active
             db.commit()
             return {"id": webhook_id, "is_active": wh.is_active}
@@ -175,7 +176,7 @@ def setup_webhook_routes(
             deleted = db.query(Webhook).filter(Webhook.id == webhook_id).delete()
             db.commit()
             if not deleted:
-                raise HTTPException(404, "Webhook not found")
+                raise HTTPException(404, t("webhook.not_found"))
         finally:
             db.close()
         return {"status": "deleted"}
@@ -237,10 +238,10 @@ def setup_webhook_routes(
     @router.post("/v1/chat")
     async def sync_chat(request: Request, body: SyncChatRequest):
         if not getattr(request.state, "api_token", False):
-            raise HTTPException(403, "This endpoint requires an API token")
+            raise HTTPException(403, t("webhook.endpoint_requires_token"))
         scopes = set(getattr(request.state, "api_token_scopes", []) or [])
         if "chat" not in scopes:
-            raise HTTPException(403, "API token is not scoped for chat")
+            raise HTTPException(403, t("webhook.token_not_scoped"))
         token_owner = getattr(request.state, "api_token_owner", None)
 
         from core.models import ChatMessage
@@ -249,7 +250,7 @@ def setup_webhook_routes(
 
         message = body.message.strip()
         if not message:
-            raise HTTPException(400, "Message is required")
+            raise HTTPException(400, t("webhook.message_required"))
 
         session_id = body.session
         sess = None
@@ -259,7 +260,7 @@ def setup_webhook_routes(
             try:
                 sess = session_manager.get_session(session_id)
             except (KeyError, Exception):
-                raise HTTPException(404, "Session not found")
+                raise HTTPException(404, t("webhook.session_not_found"))
             # SECURITY: verify the API-token's user owns this session — without
             # this any token holder could resume any user's chat by passing its
             # ID. The token's user is on request.state.user (set by API-token
@@ -274,7 +275,7 @@ def setup_webhook_routes(
             # chat-scoped token.
             _sess_owner = getattr(sess, "owner", None)
             if not _caller_owns_session(_sess_owner, _tok_user):
-                raise HTTPException(404, "Session not found")
+                raise HTTPException(404, t("webhook.session_not_found"))
 
         # --- Case 2: Direct API key + model (no pre-configured endpoint needed) ---
         if not sess and body.api_key:
@@ -293,14 +294,12 @@ def setup_webhook_routes(
             else:
                 base_url = _resolve_base_url(model, body.provider)
             if not base_url:
-                raise HTTPException(400,
-                    "Could not auto-detect provider. Pass base_url (e.g. 'https://api.deepseek.com/v1') "
-                    "or provider ('deepseek', 'openai', 'groq', etc.)")
+                raise HTTPException(400, t("webhook.auto_detect_failed"))
             base_url = normalize_base(base_url)
             endpoint_url = build_chat_url(base_url)
 
             if not session_manager:
-                raise HTTPException(500, "Session manager not available")
+                raise HTTPException(500, t("webhook.session_manager_unavailable"))
 
             sid = str(uuid.uuid4())
             sess = session_manager.create_session(
@@ -320,9 +319,7 @@ def setup_webhook_routes(
                 db.close()
 
             if not ep:
-                raise HTTPException(400,
-                    "No session, api_key, or configured endpoints. "
-                    "Pass api_key + model, or configure an endpoint in Admin.")
+                raise HTTPException(400, t("webhook.no_fallback_endpoint"))
 
             base_url = normalize_base(ep.base_url)
             endpoint_url = build_chat_url(base_url)
@@ -334,7 +331,7 @@ def setup_webhook_routes(
                     base_url, api_key = resolve_endpoint_runtime(ep, owner=token_owner)
                     endpoint_url = build_chat_url(base_url)
                 except Exception:
-                    raise HTTPException(500, "Could not resolve endpoint credentials")
+                    raise HTTPException(500, t("webhook.resolve_credentials_failed"))
 
             if model == "auto":
                 try:
@@ -345,8 +342,9 @@ def setup_webhook_routes(
                             resp = await client.get(models_url, headers=hdrs)
                             resp.raise_for_status()
                             data = resp.json()
-                            ids = [m.get("id") for m in (data.get("data") or []) if m.get("id")]
-                            if not ids:
+                            items = data if isinstance(data, list) else (data.get("data") or [])
+                            ids = [m.get("id") for m in items if isinstance(m, dict) and m.get("id")]
+                            if not ids and isinstance(data, dict):
                                 ids = [
                                     m.get("name") or m.get("model")
                                     for m in (data.get("models") or [])
@@ -357,10 +355,10 @@ def setup_webhook_routes(
                             ids = _json.loads(ep.cached_models or "[]")
                         model = ids[0] if ids else "auto"
                 except Exception:
-                    raise HTTPException(500, "Could not discover models from endpoint")
+                    raise HTTPException(500, t("webhook.discover_models_failed"))
 
             if not session_manager:
-                raise HTTPException(500, "Session manager not available")
+                raise HTTPException(500, t("webhook.session_manager_unavailable"))
 
             sid = str(uuid.uuid4())
             sess = session_manager.create_session(

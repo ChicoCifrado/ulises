@@ -2,6 +2,16 @@
 import mimetypes
 import os
 import sys
+import asyncio
+
+# On Windows, asyncio.create_subprocess_exec/shell require the ProactorEventLoop.
+# When started via `python -m uvicorn` from a terminal, uvicorn sets this
+# automatically. But the VS Code debugger (and other non-uvicorn entrypoints)
+# use the default SelectorEventLoop, which raises NotImplementedError on any
+# subprocess call. Force ProactorEventLoop here so the right loop is always
+# used, regardless of how the process is launched.
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 
 def register_static_mime_types() -> None:
@@ -50,13 +60,15 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.gzip import GZipMiddleware
 
+from core.translations import t
+
 # Core imports
 from core.constants import (
     BASE_DIR, STATIC_DIR, SESSIONS_FILE,
     REQUEST_TIMEOUT, OPENAI_API_KEY, AUTH_FILE,
 )
 from core.database import SessionLocal, ApiToken
-from core.middleware import SecurityHeadersMiddleware, is_cors_preflight
+from core.middleware import SecurityHeadersMiddleware, LanguageMiddleware, is_cors_preflight
 from core.auth import AuthManager, normalize_known_username
 from core.exceptions import (
     SessionNotFoundError, InvalidFileUploadError,
@@ -115,7 +127,7 @@ app = FastAPI(
 
 # ========= CORS =========
 CORS_ALLOW_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"]
-allowed_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost,http://127.0.0.1").split(",")
+allowed_origins = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "http://localhost,http://127.0.0.1").split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
@@ -146,6 +158,7 @@ app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 
 # ========= SECURITY HEADERS MIDDLEWARE =========
 app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(LanguageMiddleware)
 
 
 # ========= REQUEST TIMEOUT (FALLBACK FOR HUNG HANDLERS) =========
@@ -182,12 +195,24 @@ class _RequestTimeoutMiddleware(_BaseHTTPMiddleware):
             return await _asyncio.wait_for(call_next(request), timeout=REQUEST_HARD_TIMEOUT)
         except _asyncio.TimeoutError:
             return _JSONResponse(
-                {"detail": f"Request exceeded {REQUEST_HARD_TIMEOUT:.0f}s timeout"},
+                {"detail": t("common.errors.timeout").format(seconds=int(REQUEST_HARD_TIMEOUT))},
                 status_code=504,
             )
 
 
+class _InteractiveActivityMiddleware(_BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        from src.interactive_gate import should_track_interactive_request, track_interactive_request
+
+        path = request.url.path or ""
+        if not should_track_interactive_request(path, request.method):
+            return await call_next(request)
+        async with track_interactive_request(path, request.method):
+            return await call_next(request)
+
+
 app.add_middleware(_RequestTimeoutMiddleware)
+app.add_middleware(_InteractiveActivityMiddleware)
 
 # ========= AUTH =========
 from routes.auth_routes import setup_auth_routes, SESSION_COOKIE
@@ -346,7 +371,7 @@ if AUTH_ENABLED:
                 # No users yet — redirect to login for first-time setup
                 if not path.startswith("/api/"):
                     return RedirectResponse(url="/login", status_code=302)
-                return JSONResponse(status_code=401, content={"error": "Setup required"})
+                return JSONResponse(status_code=401, content={"error": t("auth.setup_required")})
 
             # --- Bearer token auth (API tokens for external integrations) ---
             auth_header = request.headers.get("authorization", "")
@@ -354,7 +379,7 @@ if AUTH_ENABLED:
                 raw_token = auth_header[7:]
                 # Sanity check: tokens are "ody_" + 43 chars of base64
                 if len(raw_token) < 12 or len(raw_token) > 100:
-                    return JSONResponse(status_code=401, content={"error": "Invalid API token"})
+                    return JSONResponse(status_code=401, content={"error": t("auth.invalid_token")})
                 prefix = raw_token[:8]
                 try:
                     if app.state._token_cache_dirty:
@@ -400,13 +425,13 @@ if AUTH_ENABLED:
                 except Exception:
                     logger.warning("API token auth error", exc_info=False)
                 # Invalid bearer token — reject immediately
-                return JSONResponse(status_code=401, content={"error": "Invalid API token"})
+                return JSONResponse(status_code=401, content={"error": t("auth.invalid_token")})
 
             # --- Cookie-based session auth ---
             token = request.cookies.get(SESSION_COOKIE)
             if not auth_manager.validate_token(token):
                 if path.startswith("/api/"):
-                    return JSONResponse(status_code=401, content={"error": "Not authenticated"})
+                    return JSONResponse(status_code=401, content={"error": t("auth.not_authenticated")})
                 return RedirectResponse(url="/login", status_code=302)
 
             # Attach current username to request state for downstream routes
@@ -460,7 +485,7 @@ async def serve_generated_image(filename: str, request: Request):
                 # Generated-but-not-yet-imported images have no row → allow.
                 # Row exists with a different owner → 404 (don't confirm existence).
                 if _row is not None and _row.owner and _row.owner != _user:
-                    raise HTTPException(status_code=404, detail="Image not found")
+                    raise HTTPException(status_code=404, detail=t("generated_images.not_found"))
             finally:
                 _db.close()
     except HTTPException:
@@ -594,7 +619,7 @@ from routes.admin_wipe_routes import setup_admin_wipe_routes
 app.include_router(setup_admin_wipe_routes(session_manager))
 
 # Memory
-from routes.memory_routes import setup_memory_routes
+from routes.memory.memory_routes import setup_memory_routes
 memory_router = setup_memory_routes(memory_manager, session_manager, memory_vector=memory_vector)
 app.include_router(memory_router)
 from routes.skills_routes import setup_skills_routes
@@ -611,11 +636,11 @@ app.include_router(setup_chat_routes(
 ))
 
 # Research (background deep-research tasks)
-from routes.research_routes import setup_research_routes
+from routes.research.research_routes import setup_research_routes
 app.include_router(setup_research_routes(research_handler, session_manager=session_manager))
 
 # History
-from routes.history_routes import setup_history_routes
+from routes.history.history_routes import setup_history_routes
 app.include_router(setup_history_routes(session_manager))
 
 # Search
@@ -675,7 +700,7 @@ from routes.signature_routes import setup_signature_routes
 app.include_router(setup_signature_routes())
 
 # Gallery (image library)
-from routes.gallery_routes import setup_gallery_routes
+from routes.gallery.gallery_routes import setup_gallery_routes
 app.include_router(setup_gallery_routes())
 
 # Persisted image-editor drafts (server-backed projects)
@@ -783,11 +808,15 @@ from routes.vault_routes import setup_vault_routes
 app.include_router(setup_vault_routes())
 
 # Contacts (CardDAV)
-from routes.contacts_routes import setup_contacts_routes
+from routes.contacts.contacts_routes import setup_contacts_routes
 app.include_router(setup_contacts_routes())
 
 from companion import setup_companion_routes
 app.include_router(setup_companion_routes())
+
+# i18n API — merged locale JSON for the frontend
+from routes.i18n_routes import setup_i18n_routes
+app.include_router(setup_i18n_routes())
 
 # ========= ROUTES (kept in app.py) =========
 
@@ -807,7 +836,7 @@ async def serve_index(request: Request):
     root_path = abs_join(BASE_DIR, "index.html")
     if os.path.exists(root_path):
         return _serve_html_with_nonce(request, root_path)
-    raise HTTPException(404, "index.html not found")
+    raise HTTPException(404, t("common.not_found"))
 
 @app.get("/notes")
 async def serve_notes(request: Request):
@@ -914,6 +943,14 @@ async def _startup_event():
     global upload_cleanup_task
     logger.info("Application starting up...")
     webhook_manager.set_loop(asyncio.get_running_loop())
+    # Run database migrations before any code accesses the DB.
+    # Run in a thread to avoid blocking the event loop on 35+ migrations.
+    try:
+        from core.database import init_db
+        await asyncio.to_thread(init_db)
+    except Exception as e:
+        logger.exception("Database initialization failed: %s", e)
+        raise
     # Wipe any leftover incognito sessions from previous process — they're
     # ephemeral by design and must not survive a restart.
     try:

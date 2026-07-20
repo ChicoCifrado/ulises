@@ -36,13 +36,15 @@ import {
   attachSpinRepeat,
 } from '../build/transform-popup.js';
 
+import { t } from '../../i18n.js';
+
 export function createTransformSession({
   activeLayer, saveState, composite, fitZoom, drawTransformHandles,
   showCanvasLoading, hideCanvasLoading, undo, uiModule,
 }) {
   function startTransform() {
     const layer = activeLayer();
-    if (!layer || layer.locked) { uiModule.showToast('Select an unlocked layer'); return; }
+    if (!layer || layer.locked) { uiModule.showToast(t('document.editor.select_unlocked_layer')); return; }
     if (state.transformActive) { cancelTransform(); return; } // toggle off
     state.transformActive = true;
     state.transformLayer = layer;
@@ -360,7 +362,7 @@ export function createTransformSession({
     state.transformLayer = null;
     state.transformHandle = null;
     composite();
-    uiModule.showToast('Transform applied');
+    uiModule.showToast(t('document.editor.transform_applied'));
   }
 
   function cancelTransform() {

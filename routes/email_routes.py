@@ -23,6 +23,8 @@ import smtplib
 import json
 import re
 import html
+import io
+import zipfile
 from html.parser import HTMLParser as _HTMLParser
 import logging
 import uuid
@@ -33,11 +35,12 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
 from fastapi import APIRouter, Query, UploadFile, File, BackgroundTasks, HTTPException, Depends, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from src.constants import DATA_DIR
 
 from src.llm_core import llm_call_async
 from src.upload_limits import read_upload_limited, EMAIL_COMPOSE_UPLOAD_MAX_BYTES
+from core.translations import t
 
 from routes.email_helpers import (
     _strip_think, _extract_reply, _apply_email_style_mechanics, require_owner, require_user, _assert_owns_account,
@@ -46,6 +49,7 @@ from routes.email_helpers import (
     _send_smtp_message, _smtp_security_mode,
     _IMAP_TIMEOUT_SECONDS, _open_imap_connection,
     make_oauth_state, verify_oauth_state,
+    EmailNotConfiguredError,
     _imap_connect, _imap, _decode_header, _detect_sent_folder, _detect_drafts_folder,
     _extract_attachment_text, _list_attachments_from_msg, _has_visible_attachments, _is_likely_signature_image_attachment,
     _extract_attachment_to_disk, _extract_html, _extract_text,
@@ -62,6 +66,29 @@ logger = logging.getLogger(__name__)
 
 ULISES_MAIL_ORIGIN = "ulises-ui"
 EMAIL_READ_ATTACHMENT_VERSION = 2
+
+
+def _safe_attachment_zip_name(name: str, fallback: str) -> str:
+    """Return a zip entry filename without path traversal or empty names."""
+    base = Path(str(name or "")).name.strip() or fallback
+    base = re.sub(r"[\x00-\x1f\x7f]+", "_", base)
+    base = base.replace("/", "_").replace("\\", "_").strip(". ") or fallback
+    return base[:180] or fallback
+
+
+def _coerce_port(value, default):
+    """Coerce a user-supplied port to int.
+
+    Returns ``(port, error)``. A missing or blank value yields ``default``; a
+    non-numeric value yields ``(None, message)`` so callers can return a clean
+    error instead of letting ``int()`` raise and surface as an HTTP 500.
+    """
+    if value in (None, ""):
+        return default, None
+    try:
+        return int(value), None
+    except (TypeError, ValueError):
+        return None, f"Invalid port {value!r}; must be a whole number"
 
 
 def _email_tag_owner_aliases(account_id: str | None, owner: str = "") -> list[str]:
@@ -322,7 +349,7 @@ def _resolve_send_config(account_id: str | None = None, owner: str = "") -> dict
     if _smtp_ready(cfg):
         return cfg
     if account_id:
-        raise ValueError(f"Email account {cfg.get('account_name') or account_id} has no SMTP configured")
+        raise ValueError(t("email.no_smtp_on_account").format(name=cfg.get('account_name') or account_id))
     try:
         from core.database import SessionLocal as _SL, EmailAccount as _EA
         from sqlalchemy import and_, or_
@@ -341,7 +368,7 @@ def _resolve_send_config(account_id: str | None = None, owner: str = "") -> dict
             db.close()
     except Exception as e:
         logger.debug(f"SMTP-capable account fallback failed: {e}")
-    raise ValueError("No SMTP-capable email account configured")
+    raise ValueError(t("email.no_smtp_capable"))
 
 
 def _store_email_flag(conn, uid: str, flag: str, add: bool = True) -> bool:
@@ -695,7 +722,7 @@ def setup_email_routes():
             conn = _imap_connect(account_id, owner=owner)
             select_status, _ = conn.select(_q(folder), readonly=True)
             if select_status != "OK":
-                return {"emails": [], "total": 0, "folder": folder, "error": f"Folder not found: {folder}"}
+                return {"emails": [], "total": 0, "folder": folder, "error": t("email.folder_not_found").format(folder=folder)}
 
             from_clause = ""
             if from_addr:
@@ -1014,10 +1041,15 @@ def setup_email_routes():
                 logger.debug(f"Bulk summary attach skipped: {_summary_err}")
 
             return {"emails": emails, "total": total, "folder": folder, "offset": offset}
+        except EmailNotConfiguredError:
+            # Send-only (SMTP-only) account: there is no inbox to read, so the
+            # poll returns an empty list instead of a per-minute error. SMTP
+            # send is unaffected.
+            return {"emails": [], "total": 0, "folder": folder, "offset": offset}
         except Exception as e:
             logger.error(f"Failed to list emails: {e}")
             detail = str(e).strip()
-            return {"emails": [], "total": 0, "error": f"Mail operation failed: {detail[:180]}" if detail else "Mail operation failed"}
+            return {"emails": [], "total": 0, "error": t("email.operation_failed_detail").format(detail=detail[:180]) if detail else t("email.operation_failed")}
         finally:
             if conn:
                 try:
@@ -1135,7 +1167,7 @@ def setup_email_routes():
             return {"ok": True}
         except Exception as e:
             logger.error(f"unflag-spam failed: {e}")
-            return {"ok": False, "error": "Mail operation failed"}
+            return {"ok": False, "error": t("email.operation_failed")}
 
     @router.get("/contacts")
     async def list_contacts(
@@ -1180,7 +1212,7 @@ def setup_email_routes():
             return {"contacts": items[: max(1, int(limit))]}
         except Exception as e:
             logger.error(f"contacts list failed: {e}")
-            return {"contacts": [], "error": "Mail operation failed"}
+            return {"contacts": [], "error": t("email.operation_failed")}
 
     @router.get("/search")
     # Sync def: the body is blocking IMAP I/O with no awaits. As `async def` it ran
@@ -1203,7 +1235,7 @@ def setup_email_routes():
             return {"emails": [], "total": 0, "query": q}
         # CRLF in q would terminate the IMAP command early — reject defensively.
         if "\r" in q or "\n" in q:
-            raise HTTPException(400, "Invalid query")
+            raise HTTPException(400, t("email.invalid_query"))
         try:
             with _imap(account_id, owner=owner) as conn:
                 # If the user asked for INBOX, try to upgrade to All Mail —
@@ -1314,7 +1346,7 @@ def setup_email_routes():
                 return {"emails": emails, "total": total, "query": q}
         except Exception as e:
             logger.error(f"Search failed: {e}")
-            return {"emails": [], "total": 0, "error": "Mail operation failed"}
+            return {"emails": [], "total": 0, "error": t("email.operation_failed")}
 
     def _read_email_sync(uid, folder, account_id, owner, mark_seen=True):
         """Sync IMAP read — wrapped in to_thread by the async handler.
@@ -1335,7 +1367,7 @@ def setup_email_routes():
                 status, msg_data = _imap_uid_fetch(conn, uid, "(BODY.PEEK[])")
                 _t_fetch = _t.monotonic() - _t0
                 if status != "OK":
-                    return {"error": f"Email UID {uid} not found"}
+                    return {"error": t("email.email_not_found_uid").format(uid=uid)}
                 raw = msg_data[0][1]
 
             msg = email_mod.message_from_bytes(raw)
@@ -1483,7 +1515,7 @@ def setup_email_routes():
             }
         except Exception as e:
             logger.error(f"Failed to read email {uid}: {e}")
-            return {"error": "Mail operation failed"}
+            return {"error": t("email.operation_failed")}
 
     def _mark_email_seen_sync(uid, folder, account_id, owner):
         try:
@@ -1582,14 +1614,14 @@ def setup_email_routes():
                 conn.select(_q(folder), readonly=True)
                 status, msg_data = _imap_uid_fetch(conn, uid, "(RFC822)")
             if status != "OK":
-                return {"attachments": [], "error": "Email not found"}
+                return {"attachments": [], "error": t("email.email_not_found")}
             raw = msg_data[0][1]
             msg = email_mod.message_from_bytes(raw)
             attachments = _list_attachments_from_msg(msg)
             return {"attachments": attachments, "uid": uid}
         except Exception as e:
             logger.error(f"Failed to list attachments for {uid}: {e}")
-            return {"attachments": [], "error": "Mail operation failed"}
+            return {"attachments": [], "error": t("email.operation_failed")}
 
     @router.get("/attachment/{uid}/{index}")
     async def download_attachment(uid: str, index: int, folder: str = Query("INBOX"), account_id: str | None = Query(None), owner: str = Depends(require_owner)):
@@ -1599,7 +1631,7 @@ def setup_email_routes():
                 conn.select(_q(folder), readonly=True)
                 status, msg_data = _imap_uid_fetch(conn, uid, "(RFC822)")
             if status != "OK":
-                return {"error": "Email not found"}
+                return {"error": t("email.email_not_found")}
             raw = msg_data[0][1]
             msg = email_mod.message_from_bytes(raw)
 
@@ -1607,7 +1639,7 @@ def setup_email_routes():
             target_dir = attachment_extract_dir(folder, uid)
             filepath = _extract_attachment_to_disk(msg, index, target_dir)
             if not filepath:
-                return {"error": f"Attachment index {index} not found"}
+                return {"error": t("email.attachment_not_found").format(index=index)}
 
             return FileResponse(
                 path=str(filepath),
@@ -1616,7 +1648,111 @@ def setup_email_routes():
             )
         except Exception as e:
             logger.error(f"Failed to download attachment {uid}/{index}: {e}")
-            return {"error": "Mail operation failed"}
+            return {"error": t("email.operation_failed")}
+
+    @router.get("/attachments-download/{uid}")
+    async def download_all_attachments(uid: str, folder: str = Query("INBOX"), account_id: str | None = Query(None), owner: str = Depends(require_owner)):
+        """Download all visible attachments for an email as a zip archive."""
+        try:
+            with _imap(account_id, owner=owner) as conn:
+                conn.select(_q(folder), readonly=True)
+                status, msg_data = _imap_uid_fetch(conn, uid, "(RFC822)")
+            if status != "OK":
+                raise HTTPException(status_code=404, detail="Email not found")
+            raw = msg_data[0][1]
+            msg = email_mod.message_from_bytes(raw)
+            attachments = [
+                att for att in _list_attachments_from_msg(msg)
+                if not _is_likely_signature_image_attachment(att)
+            ]
+            if not attachments:
+                raise HTTPException(status_code=404, detail="No downloadable attachments")
+
+            target_dir = attachment_extract_dir(folder, uid)
+            zip_buf = io.BytesIO()
+            used_names: dict[str, int] = {}
+            with zipfile.ZipFile(zip_buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                for att in attachments:
+                    idx = att.get("index")
+                    if idx is None:
+                        continue
+                    filepath = _extract_attachment_to_disk(msg, int(idx), target_dir)
+                    if not filepath or not Path(filepath).exists():
+                        continue
+                    fallback = f"attachment-{idx}"
+                    arcname = _safe_attachment_zip_name(att.get("filename") or Path(filepath).name, fallback)
+                    stem = Path(arcname).stem
+                    suffix = Path(arcname).suffix
+                    seen = used_names.get(arcname, 0)
+                    used_names[arcname] = seen + 1
+                    if seen:
+                        arcname = f"{stem}-{seen + 1}{suffix}"
+                    zf.write(str(filepath), arcname)
+            zip_buf.seek(0)
+            if not zip_buf.getbuffer().nbytes:
+                raise HTTPException(status_code=404, detail="No downloadable attachments")
+            zip_name = _safe_attachment_zip_name(f"email-{uid}-attachments.zip", "attachments.zip")
+            return StreamingResponse(
+                zip_buf,
+                media_type="application/zip",
+                headers={"Content-Disposition": f'attachment; filename="{zip_name}"'},
+            )
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to download attachments zip {uid}: {e}")
+            raise HTTPException(status_code=500, detail="Mail operation failed")
+
+    @router.get("/inline-image/{uid}")
+    async def inline_image(
+        uid: str,
+        cid: str = Query(...),
+        folder: str = Query("INBOX"),
+        account_id: str | None = Query(None),
+        owner: str = Depends(require_owner),
+    ):
+        """Serve an inline MIME image by Content-ID after the user explicitly clicks Load."""
+        want = (cid or "").strip().strip("<>")
+        if not want:
+            raise HTTPException(status_code=400, detail="Missing image Content-ID")
+        try:
+            with _imap(account_id, owner=owner) as conn:
+                conn.select(_q(folder), readonly=True)
+                status, msg_data = _imap_uid_fetch(conn, uid, "(RFC822)")
+            if status != "OK":
+                raise HTTPException(status_code=404, detail="Email not found")
+            raw = msg_data[0][1]
+            msg = email_mod.message_from_bytes(raw)
+            idx = 0
+            for part in msg.walk():
+                cd = str(part.get("Content-Disposition", ""))
+                ct = part.get_content_type()
+                is_attached_email = ct == "message/rfc822" and ("attachment" in cd.lower() or part.get_filename())
+                if part.is_multipart() and not is_attached_email:
+                    continue
+                if ct in ("text/plain", "text/html") and "attachment" not in cd:
+                    continue
+                content_id = (part.get("Content-ID") or "").strip().strip("<>")
+                if content_id != want:
+                    idx += 1
+                    continue
+                if not ct.lower().startswith("image/"):
+                    raise HTTPException(status_code=415, detail="Content-ID is not an image")
+                target_dir = attachment_extract_dir(folder, uid)
+                filepath = _extract_attachment_to_disk(msg, idx, target_dir)
+                if not filepath:
+                    raise HTTPException(status_code=404, detail="Inline image not found")
+                return FileResponse(
+                    path=str(filepath),
+                    media_type=ct,
+                    headers={"Content-Disposition": f'inline; filename="{filepath.name}"'},
+                )
+            raise HTTPException(status_code=404, detail="Inline image not found")
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to load inline image {uid}/{want}: {e}")
+            return {"error": t("email.operation_failed")}
 
     @router.post("/attachment-as-doc/{uid}/{index}")
     async def attachment_as_doc(uid: str, index: int, request: Request, folder: str = Query("INBOX"), account_id: str | None = Query(None), owner: str = Depends(require_owner)):
@@ -1635,25 +1771,25 @@ def setup_email_routes():
                 conn.select(_q(folder), readonly=True)
                 status, msg_data = _imap_uid_fetch(conn, uid, "(RFC822)")
             if status != "OK":
-                return {"error": "Email not found"}
+                return {"error": t("email.email_not_found")}
             raw = msg_data[0][1]
             msg = email_mod.message_from_bytes(raw)
 
             target_dir = attachment_extract_dir(folder, uid)
             filepath = _extract_attachment_to_disk(msg, index, target_dir)
             if not filepath:
-                return {"error": f"Attachment index {index} not found"}
+                return {"error": t("email.attachment_not_found").format(index=index)}
 
             from pathlib import Path as _Path
             target_root = os.path.abspath(str(target_dir))
             filepath_str = os.path.abspath(str(filepath))
             if os.path.commonpath([target_root, filepath_str]) != target_root:
                 logger.warning("Rejected attachment path outside extraction dir: %s", filepath)
-                return {"error": "Invalid attachment path"}
+                return {"error": t("email.invalid_attachment_path")}
             filepath = _Path(filepath_str)
             base = _Path(filepath).name
             if base.startswith("."):
-                return {"error": "Invalid filename", "filename": base}
+                return {"error": t("email.invalid_filename"), "filename": base}
             ext = _Path(base).suffix.lower()
 
             import os as _os
@@ -1729,12 +1865,12 @@ def setup_email_routes():
 
             def _attached_email_markdown(raw_bytes: bytes):
                 if not raw_bytes:
-                    return f"# Attached email: {base}\n\n_(empty email attachment)_"
+                    return f"# {t('email.attached_email_label')}: {base}\n\n_{t('email.attached_email_empty')}_"
                 try:
                     attached_msg = email_mod.message_from_bytes(raw_bytes)
                 except Exception:
                     logger.exception("Failed to parse attached email %s", base)
-                    return f"# Attached email: {base}\n\nCould not parse this email attachment."
+                    return f"# {t('email.attached_email_label')}: {base}\n\n{t('email.attached_email_could_not_parse')}"
 
                 attached_subject = _decode_header(attached_msg.get("Subject", "")) or base
                 attached_from = _decode_header(attached_msg.get("From", ""))
@@ -1744,18 +1880,18 @@ def setup_email_routes():
                 attached_body = _extract_text(attached_msg).strip()
                 attached_atts = _list_attachments_from_msg(attached_msg)
 
-                lines = [f"# Attached email: {attached_subject}", ""]
+                lines = [f"# {t('email.attached_email_label')}: {attached_subject}", ""]
                 if attached_from:
-                    lines.append(f"**From:** {attached_from}")
+                    lines.append(f"**{t('email.from_label')}:** {attached_from}")
                 if attached_to:
-                    lines.append(f"**To:** {attached_to}")
+                    lines.append(f"**{t('email.to_label')}:** {attached_to}")
                 if attached_cc:
-                    lines.append(f"**Cc:** {attached_cc}")
+                    lines.append(f"**{t('email.cc_label')}:** {attached_cc}")
                 if attached_date:
-                    lines.append(f"**Date:** {attached_date}")
-                lines.extend(["", "## Body", "", attached_body or "_(no readable body)_"])
+                    lines.append(f"**{t('email.date_label')}:** {attached_date}")
+                lines.extend(["", f"## {t('email.body_label')}", "", attached_body or f"_{t('email.no_readable_body')}_"])
                 if attached_atts:
-                    lines.extend(["", "## Attachments", ""])
+                    lines.extend(["", f"## {t('email.attachments_label')}", ""])
                     for att in attached_atts:
                         size = int(att.get("size") or 0)
                         size_label = f"{size} B" if size < 1024 else f"{round(size / 1024)} KB"
@@ -1806,7 +1942,7 @@ def setup_email_routes():
                     )
 
                 if not doc_id:
-                    return {"error": "Failed to create document"}
+                    return {"error": t("email.failed_to_create_document")}
                 _tag_doc_with_source(doc_id)
                 return {"doc_id": doc_id, "filename": filepath.name}
 
@@ -1839,8 +1975,8 @@ def setup_email_routes():
                     content = _attached_email_markdown(_attachment_bytes_from_msg())
                 except Exception:
                     logger.exception("Failed to read email attachment %s", base)
-                    return {"error": "Failed to read email attachment", "filename": base}
-                doc_id = _create_markdown_doc(content, "Imported attached email")
+                    return {"error": t("email.failed_read_email_attachment"), "filename": base}
+                doc_id = _create_markdown_doc(content, t("email.imported_attached_email"))
                 return {"doc_id": doc_id, "filename": filepath.name}
 
             # ── DOCX path: extract text → markdown document ───────────
@@ -1848,11 +1984,11 @@ def setup_email_routes():
                 try:
                     from docx import Document as _Docx
                 except ImportError:
-                    return {"error": "python-docx not installed", "filename": base}
+                    return {"error": t("email.python_docx_not_installed"), "filename": base}
                 try:
                     d = _Docx(str(filepath))
                 except Exception as e:
-                    return {"error": f"Failed to read docx: {e}", "filename": base}
+                    return {"error": t("email.failed_read_docx").format(error=e), "filename": base}
                 # Convert paragraphs to markdown — preserve heading styles as #/##/###,
                 # bullet lists as `- `, numbered lists as `1.`, and keep tables as
                 # simple pipe-delimited rows.
@@ -1878,9 +2014,9 @@ def setup_email_routes():
                         if ri == 0:
                             lines.append("|" + "|".join(["---"] * len(cells)) + "|")
                     lines.append("")
-                content = "\n".join(lines).strip() or f"_(empty {base})_"
+                content = "\n".join(lines).strip() or f"_{t('email.empty_doc_content').format(filename=base)}_"
 
-                doc_id = _create_markdown_doc(content, "Imported from DOCX")
+                doc_id = _create_markdown_doc(content, t("email.imported_docx"))
                 return {"doc_id": doc_id, "filename": filepath.name}
 
             # ── Plain text / markdown ────────────────────────────────
@@ -1888,14 +2024,14 @@ def setup_email_routes():
                 try:
                     content = filepath.read_text(encoding="utf-8", errors="replace")
                 except Exception as e:
-                    return {"error": f"Failed to read text file: {e}", "filename": base}
-                doc_id = _create_markdown_doc(content, "Imported from email attachment")
+                    return {"error": t("email.failed_read_text").format(error=e), "filename": base}
+                doc_id = _create_markdown_doc(content, t("email.imported_attachment"))
                 return {"doc_id": doc_id, "filename": filepath.name}
 
-            return {"error": f"Unsupported attachment type: {ext}", "filename": base}
+            return {"error": t("email.unsupported_attachment_type").format(ext=ext), "filename": base}
         except Exception as e:
             logger.error(f"attachment-as-doc {uid}/{index} failed: {e}")
-            return {"error": "Mail operation failed"}
+            return {"error": t("email.operation_failed")}
 
     @router.post("/attachment-path/{uid}/{index}")
     async def get_attachment_path(uid: str, index: int, folder: str = Query("INBOX"), account_id: str | None = Query(None), owner: str = Depends(require_owner)):
@@ -1905,19 +2041,19 @@ def setup_email_routes():
                 conn.select(_q(folder), readonly=True)
                 status, msg_data = _imap_uid_fetch(conn, uid, "(RFC822)")
             if status != "OK":
-                return {"error": "Email not found"}
+                return {"error": t("email.email_not_found")}
             raw = msg_data[0][1]
             msg = email_mod.message_from_bytes(raw)
 
             target_dir = attachment_extract_dir(folder, uid)
             filepath = _extract_attachment_to_disk(msg, index, target_dir)
             if not filepath:
-                return {"error": f"Attachment index {index} not found"}
+                return {"error": t("email.attachment_not_found").format(index=index)}
 
             return {"path": str(filepath), "filename": filepath.name, "size": filepath.stat().st_size}
         except Exception as e:
             logger.error(f"Failed to get attachment path {uid}/{index}: {e}")
-            return {"error": "Mail operation failed"}
+            return {"error": t("email.operation_failed")}
 
     @router.post("/mark-unread/{uid}")
     async def mark_unread(uid: str, folder: str = Query("INBOX"), account_id: str | None = Query(None), owner: str = Depends(require_owner)):
@@ -1926,12 +2062,12 @@ def setup_email_routes():
             with _imap(account_id, owner=owner) as conn:
                 conn.select(_q(folder))
                 if not _store_email_flag(conn, uid, "\\Seen", add=False):
-                    return {"success": False, "error": "Email not found"}
+                    return {"success": False, "error": t("email.email_not_found")}
             _invalidate_list_cache(account_id, folder)
             return {"success": True}
         except Exception as e:
             logger.error(f"Failed to mark unread {uid}: {e}")
-            return {"success": False, "error": "Mail operation failed"}
+            return {"success": False, "error": t("email.operation_failed")}
 
     @router.post("/flag/{uid}")
     async def flag_email(uid: str, folder: str = Query("INBOX"), account_id: str | None = Query(None),
@@ -1942,12 +2078,12 @@ def setup_email_routes():
             with _imap(account_id, owner=owner) as conn:
                 conn.select(_q(folder))
                 if not _store_email_flag(conn, uid, "\\Flagged", add=bool(on)):
-                    return {"success": False, "error": "Email not found"}
+                    return {"success": False, "error": t("email.email_not_found")}
             _invalidate_list_cache(account_id, folder)
             return {"success": True, "flagged": bool(on)}
         except Exception as e:
             logger.error(f"Failed to flag {uid}: {e}")
-            return {"success": False, "error": "Mail operation failed"}
+            return {"success": False, "error": t("email.operation_failed")}
 
     @router.post("/mark-read/{uid}")
     async def mark_read(uid: str, folder: str = Query("INBOX"), account_id: str | None = Query(None), owner: str = Depends(require_owner)):
@@ -1956,12 +2092,12 @@ def setup_email_routes():
             with _imap(account_id, owner=owner) as conn:
                 conn.select(_q(folder))
                 if not _store_email_flag(conn, uid, "\\Seen", add=True):
-                    return {"success": False, "error": "Email not found"}
+                    return {"success": False, "error": t("email.email_not_found")}
             _invalidate_list_cache(account_id, folder)
             return {"success": True}
         except Exception as e:
             logger.error(f"Failed to mark read {uid}: {e}")
-            return {"success": False, "error": "Mail operation failed"}
+            return {"success": False, "error": t("email.operation_failed")}
 
     @router.post("/archive/{uid}")
     # Sync def: blocking IMAP I/O with no awaits — see search_emails above. Runs in a
@@ -1972,12 +2108,12 @@ def setup_email_routes():
             with _imap(account_id, owner=owner) as conn:
                 conn.select(_q(folder))
                 if not _move_email_message(conn, uid, "Archive", role="archive"):
-                    return {"success": False, "error": "Email not found"}
+                    return {"success": False, "error": t("email.email_not_found")}
             _invalidate_list_cache(account_id)
             return {"success": True}
         except Exception as e:
             logger.error(f"Failed to archive email {uid}: {e}")
-            return {"success": False, "error": "Mail operation failed"}
+            return {"success": False, "error": t("email.operation_failed")}
 
     @router.delete("/delete/{uid}")
     async def delete_email(uid: str, folder: str = Query("INBOX"), account_id: str | None = Query(None), owner: str = Depends(require_owner)):
@@ -1986,12 +2122,12 @@ def setup_email_routes():
             with _imap(account_id, owner=owner) as conn:
                 conn.select(_q(folder))
                 if not _move_email_message(conn, uid, "Trash", role="trash"):
-                    return {"success": False, "error": "Email not found"}
+                    return {"success": False, "error": t("email.email_not_found")}
             _invalidate_list_cache(account_id)
             return {"success": True}
         except Exception as e:
             logger.error(f"Failed to delete email {uid}: {e}")
-            return {"success": False, "error": "Mail operation failed"}
+            return {"success": False, "error": t("email.operation_failed")}
 
     @router.delete("/delete-permanent/{uid}")
     async def delete_email_permanent(uid: str, folder: str = Query("INBOX"), account_id: str | None = Query(None), owner: str = Depends(require_owner)):
@@ -2000,13 +2136,13 @@ def setup_email_routes():
             with _imap(account_id, owner=owner) as conn:
                 conn.select(_q(folder))
                 if not _store_email_flag(conn, uid, "\\Deleted", add=True):
-                    return {"success": False, "error": "Email not found"}
+                    return {"success": False, "error": t("email.email_not_found")}
                 conn.expunge()
             _invalidate_list_cache(account_id, folder)
             return {"success": True}
         except Exception as e:
             logger.error(f"Failed to permanently delete email {uid}: {e}")
-            return {"success": False, "error": "Mail operation failed"}
+            return {"success": False, "error": t("email.operation_failed")}
 
     @router.delete("/ulises/reminders")
     async def delete_ulises_reminder_emails(
@@ -2081,7 +2217,7 @@ def setup_email_routes():
             return {"success": True, "deleted": deleted, "folders_checked": folders_checked}
         except Exception as e:
             logger.error(f"delete_ulises_reminder_emails failed: {e}")
-            return {"success": False, "error": "Mail operation failed"}
+            return {"success": False, "error": t("email.operation_failed")}
 
     @router.post("/move/{uid}")
     async def move_email(uid: str, folder: str = Query("INBOX"), dest: str = Query(...), account_id: str | None = Query(None), owner: str = Depends(require_owner)):
@@ -2090,12 +2226,12 @@ def setup_email_routes():
             with _imap(account_id, owner=owner) as conn:
                 conn.select(_q(folder))
                 if not _move_email_message(conn, uid, dest):
-                    return {"success": False, "error": f"Failed to move to {dest}"}
+                    return {"success": False, "error": t("email.move_failed").format(folder=dest)}
             _invalidate_list_cache(account_id)
             return {"success": True}
         except Exception as e:
             logger.error(f"Failed to move email {uid} to {dest}: {e}")
-            return {"success": False, "error": "Mail operation failed"}
+            return {"success": False, "error": t("email.operation_failed")}
 
     @router.get("/folders")
     async def list_folders(account_id: str | None = Query(None), owner: str = Depends(require_owner)):
@@ -2113,7 +2249,7 @@ def setup_email_routes():
             return {"folders": result}
         except Exception as e:
             logger.error(f"list_folders failed: {e}")
-            return {"folders": [], "error": "Mail operation failed"}
+            return {"folders": [], "error": t("email.operation_failed")}
 
     @router.post("/mark-answered/{uid}")
     async def mark_answered(uid: str, folder: str = Query("INBOX"), account_id: str | None = Query(None), owner: str = Depends(require_owner)):
@@ -2122,11 +2258,11 @@ def setup_email_routes():
             with _imap(account_id, owner=owner) as conn:
                 conn.select(_q(folder))
                 if not _store_email_flag(conn, uid, "\\Answered", add=True):
-                    return {"success": False, "error": "Email not found"}
+                    return {"success": False, "error": t("email.email_not_found")}
             return {"success": True}
         except Exception as e:
             logger.error(f"Failed to mark answered {uid}: {e}")
-            return {"success": False, "error": "Mail operation failed"}
+            return {"success": False, "error": t("email.operation_failed")}
 
     @router.post("/clear-answered/{uid}")
     async def clear_answered(uid: str, folder: str = Query("INBOX"), account_id: str | None = Query(None), owner: str = Depends(require_owner)):
@@ -2135,11 +2271,11 @@ def setup_email_routes():
             with _imap(account_id, owner=owner) as conn:
                 conn.select(_q(folder))
                 if not _store_email_flag(conn, uid, "\\Answered", add=False):
-                    return {"success": False, "error": "Email not found"}
+                    return {"success": False, "error": t("email.email_not_found")}
             return {"success": True}
         except Exception as e:
             logger.error(f"Failed to clear answered {uid}: {e}")
-            return {"success": False, "error": "Mail operation failed"}
+            return {"success": False, "error": t("email.operation_failed")}
 
     @router.post("/compose-upload")
     async def compose_upload(file: UploadFile = File(...), owner: str = Depends(require_owner)):
@@ -2162,7 +2298,7 @@ def setup_email_routes():
             raise
         except Exception as e:
             logger.error(f"Failed to upload attachment: {e}")
-            return {"success": False, "error": "Mail operation failed"}
+            return {"success": False, "error": t("email.operation_failed")}
 
     @router.delete("/compose-upload/{token}")
     async def delete_compose_upload(token: str, owner: str = Depends(require_owner)):
@@ -2176,7 +2312,7 @@ def setup_email_routes():
             return {"success": True}
         except Exception as e:
             logger.error(f"delete_compose_upload {token!r} failed: {e}")
-            return {"success": False, "error": "Mail operation failed"}
+            return {"success": False, "error": t("email.operation_failed")}
 
     async def _send_email_sync(
         to, cc, bcc, subject, body, in_reply_to, references, attachments,
@@ -2234,7 +2370,7 @@ def setup_email_routes():
         try:
             send_at = req.get("send_at")
             if not send_at:
-                return {"success": False, "error": "send_at required (ISO8601 UTC)"}
+                return {"success": False, "error": t("email.send_at_required")}
             # Body-based account_id — dep can't see it, check here.
             _acct = req.get("account_id")
             if _acct:
@@ -2246,12 +2382,12 @@ def setup_email_routes():
             try:
                 parsed_at = _dt.fromisoformat(send_at.replace("Z", "+00:00"))
             except ValueError:
-                return {"success": False, "error": "send_at must be ISO8601"}
+                return {"success": False, "error": t("email.send_at_iso8601")}
             now_utc = _dt.now(_tz.utc) if parsed_at.tzinfo else _dt.utcnow()
             # Tiny 30s grace so a user clicking Send right at the chosen
             # minute doesn't trip the past-time guard.
             if parsed_at < now_utc:
-                return {"success": False, "error": "send_at must be in the future"}
+                return {"success": False, "error": t("email.send_at_future")}
             # Normalize to naive UTC before storing: the poller selects due
             # rows with a lexicographic string compare against a naive
             # datetime.utcnow().isoformat(), so storing the raw client string
@@ -2290,7 +2426,7 @@ def setup_email_routes():
             return {"success": True, "id": sid, "send_at": send_at}
         except Exception as e:
             logger.error(f"Failed to schedule email: {e}")
-            return {"success": False, "error": "Mail operation failed"}
+            return {"success": False, "error": t("email.operation_failed")}
 
     @router.get("/scheduled")
     async def list_scheduled(owner: str = Depends(require_owner)):
@@ -2313,7 +2449,7 @@ def setup_email_routes():
             ]}
         except Exception as e:
             logger.error(f"list_scheduled failed: {e}")
-            return {"scheduled": [], "error": "Mail operation failed"}
+            return {"scheduled": [], "error": t("email.operation_failed")}
 
     @router.delete("/scheduled/{sid}")
     async def cancel_scheduled(sid: str, owner: str = Depends(require_owner)):
@@ -2330,7 +2466,7 @@ def setup_email_routes():
             return {"success": True}
         except Exception as e:
             logger.error(f"cancel_scheduled {sid!r} failed: {e}")
-            return {"success": False, "error": "Mail operation failed"}
+            return {"success": False, "error": t("email.operation_failed")}
 
     # ── Agent send-confirm: list/approve/cancel ──────────────────────────
     # When `agent_email_confirm` is on, the MCP send_email tool drops the
@@ -2356,7 +2492,7 @@ def setup_email_routes():
             return {"pending": [dict(r) for r in rows]}
         except Exception as e:
             logger.error(f"list_pending_agent_drafts failed: {e}")
-            return {"pending": [], "error": "Mail operation failed"}
+            return {"pending": [], "error": t("email.operation_failed")}
 
     @router.post("/pending/{sid}/approve")
     async def approve_agent_draft(sid: str, owner: str = Depends(require_owner)):
@@ -2376,11 +2512,11 @@ def setup_email_routes():
             affected = cur.rowcount
             conn.close()
             if not affected:
-                return {"success": False, "error": "Draft not found or already handled"}
+                return {"success": False, "error": t("email.draft_not_found")}
             return {"success": True}
         except Exception as e:
             logger.error(f"approve_agent_draft {sid!r} failed: {e}")
-            return {"success": False, "error": "Mail operation failed"}
+            return {"success": False, "error": t("email.operation_failed")}
 
     @router.delete("/pending/{sid}")
     async def cancel_agent_draft(sid: str, owner: str = Depends(require_owner)):
@@ -2397,11 +2533,11 @@ def setup_email_routes():
             affected = cur.rowcount
             conn.close()
             if not affected:
-                return {"success": False, "error": "Draft not found or already handled"}
+                return {"success": False, "error": t("email.draft_not_found")}
             return {"success": True}
         except Exception as e:
             logger.error(f"cancel_agent_draft {sid!r} failed: {e}")
-            return {"success": False, "error": "Mail operation failed"}
+            return {"success": False, "error": t("email.operation_failed")}
 
     @router.get("/resolve-contact")
     async def resolve_contact(name: str = Query(..., description="Name to search for"), owner: str = Depends(require_owner)):
@@ -2449,7 +2585,7 @@ def setup_email_routes():
                 return {"contacts": results[:10], "query": name}
         except Exception as e:
             logger.error(f"resolve_contact {name!r} failed: {e}")
-            return {"contacts": [], "error": "Mail operation failed"}
+            return {"contacts": [], "error": t("email.operation_failed")}
 
     @router.post("/send")
     async def send_email(req: SendEmailRequest, background_tasks: BackgroundTasks, owner: str = Depends(require_owner)):
@@ -2464,7 +2600,7 @@ def setup_email_routes():
             cfg = _resolve_send_config(req.account_id, owner=owner)
         except Exception as e:
             logger.warning(f"No SMTP-capable account resolved: {e}")
-            return {"success": False, "error": str(e) or "No SMTP-capable email account configured"}
+            return {"success": False, "error": str(e) or t("email.no_smtp_capable")}
 
         # Use 'mixed' if we have attachments, 'alternative' otherwise
         has_attachments = bool(req.attachments)
@@ -2625,12 +2761,12 @@ def setup_email_routes():
                 return delivery_result
             except Exception as e:
                 logger.error(f"Failed to send email to {_to_label}: {e}")
-                return {"success": False, "error": str(e) or "Failed to send email"}
+                return {"success": False, "error": str(e) or t("email.failed_to_send")}
 
         if req.wait_for_delivery:
             result = await asyncio.to_thread(_deliver)
             if result.get("success"):
-                return {"success": True, "queued": False, "message": f"Email sent to {req.to}", **result}
+                return {"success": True, "queued": False, "message": t("email.email_sent_to").format(to=req.to), **result}
             return result
 
         background_tasks.add_task(_deliver)
@@ -2638,7 +2774,7 @@ def setup_email_routes():
             "success": True,
             "queued": True,
             "account_id": cfg.get("account_id") or req.account_id,
-            "message": f"Email queued for {req.to}",
+            "message": t("email.email_queued_for").format(to=req.to),
         }
 
     @router.post("/draft")
@@ -2691,7 +2827,7 @@ def setup_email_routes():
             logger.error(f"Failed to save draft: {err}")
             return {"success": False, "error": err}
         logger.info(f"Draft saved: {req.subject}")
-        return {"success": True, "message": "Draft saved"}
+        return {"success": True, "message": t("email.draft_saved")}
 
     @router.post("/extract-style")
     async def extract_writing_style(req: ExtractStyleRequest, owner: str = Depends(require_owner)):
@@ -2708,7 +2844,7 @@ def setup_email_routes():
                     imap.select(_q(_detect_sent_folder(imap)), readonly=True)
                     status, data = imap.search(None, "ALL")
                     if status != "OK" or not data[0]:
-                        return [], "No sent emails found"
+                        return [], t("email.no_sent_emails")
                     uid_list = data[0].split()[-req.sample_count:]
 
                     out = []
@@ -2747,7 +2883,7 @@ def setup_email_routes():
                 return {"success": False, "error": err}
 
             if len(samples) < 3:
-                return {"success": False, "error": f"Only found {len(samples)} usable sent emails, need at least 3"}
+                return {"success": False, "error": t("email.extract_too_few").format(count=len(samples))}
 
             # Call LLM to analyze writing style. Prefer the utility model;
             # fall back to the default chat model when utility isn't set
@@ -2758,7 +2894,7 @@ def setup_email_routes():
             if not url or not model:
                 url, model, headers = resolve_endpoint("default", owner=owner)
             if not url or not model:
-                return {"success": False, "error": "No LLM endpoint configured — set a Utility or Default Chat model in Settings → AI Defaults."}
+                return {"success": False, "error": t("email.no_llm_endpoint_style")}
 
             sample_text = "\n\n---EMAIL---\n\n".join(samples[:15])
             messages = [
@@ -2782,7 +2918,7 @@ def setup_email_routes():
             style = await llm_call_async(url, model, messages, headers=headers, max_tokens=2048)
             style = _strip_think(style or "")
             if not style:
-                return {"success": False, "error": "LLM failed to generate style description"}
+                return {"success": False, "error": t("email.style_generation_failed")}
 
             # Save to settings
             settings = _load_settings()
@@ -2794,7 +2930,7 @@ def setup_email_routes():
 
         except Exception as e:
             logger.error(f"Failed to extract writing style: {e}")
-            return {"success": False, "error": "Mail operation failed"}
+            return {"success": False, "error": t("email.operation_failed")}
 
     @router.post("/summarize")
     async def summarize_email(data: dict, owner: str = Depends(require_owner)):
@@ -2813,7 +2949,7 @@ def setup_email_routes():
             if account_id:
                 _assert_owns_account(account_id, owner)
             if not body:
-                return {"success": False, "error": "No body provided"}
+                return {"success": False, "error": t("email.no_body")}
 
             # If we know which UID this is, fetch the raw message and pull
             # attachment text so the summary can reference invoice totals,
@@ -2842,7 +2978,7 @@ def setup_email_routes():
             if not url:
                 url, model, headers = resolve_endpoint("default", owner=owner)
             if not url or not model:
-                return {"success": False, "error": "No LLM endpoint configured"}
+                return {"success": False, "error": t("email.no_llm_endpoint")}
 
             req_headers = {"Content-Type": "application/json"}
             if headers:
@@ -2865,7 +3001,7 @@ def setup_email_routes():
                 _req.post, url, json=payload, headers=req_headers, timeout=180
             )
             if not resp.ok:
-                return {"success": False, "error": f"LLM HTTP {resp.status_code}"}
+                return {"success": False, "error": t("email.llm_http_error").format(code=resp.status_code)}
             rdata = resp.json()
             msg = (rdata.get("choices") or [{}])[0].get("message", {})
             content = (msg.get("content") or "").strip()
@@ -2888,7 +3024,7 @@ def setup_email_routes():
                     content = paragraphs[-1] if paragraphs else rc[:500]
 
             if not content:
-                return {"success": False, "error": "Empty response from model"}
+                return {"success": False, "error": t("email.empty_response")}
 
             # Cache the summary if we have a message_id
             mid = data.get("message_id", "")
@@ -2912,7 +3048,7 @@ def setup_email_routes():
             return {"success": True, "summary": content, "model_used": model}
         except Exception as e:
             logger.error(f"Failed to summarize: {e}")
-            return {"success": False, "error": "Mail operation failed"}
+            return {"success": False, "error": t("email.operation_failed")}
 
     @router.post("/ai-reply")
     async def ai_reply(data: dict, owner: str = Depends(require_owner)):
@@ -2932,7 +3068,7 @@ def setup_email_routes():
             user_hint = (data.get("user_hint") or "").strip()
 
             if not original_body:
-                return {"success": False, "error": "No email body provided"}
+                return {"success": False, "error": t("email.no_body")}
 
             # Skip cache lookup when the caller supplied a user_hint — the
             # cached generic reply doesn't reflect the instructions and
@@ -3014,7 +3150,7 @@ def setup_email_routes():
                     model = fallback_model
 
             if not url or not model:
-                return {"success": False, "error": "No LLM endpoint configured"}
+                return {"success": False, "error": t("email.no_llm_endpoint")}
 
             # Resolve the model against what the endpoint actually serves. A
             # stored session model can drift from the server's
@@ -3138,11 +3274,11 @@ def setup_email_routes():
             except Exception as e:
                 detail = getattr(e, "detail", None) or str(e)
                 _attempted = ", ".join(f"{m}@{u.split('/')[2] if '/' in u else u}" for u, m, _ in _candidates) or "no candidates"
-                return {"success": False, "error": f"All endpoints failed ({_attempted}): {detail}. Check your API keys in Settings → Services."}
+                return {"success": False, "error": t("email.all_endpoints_failed").format(attempted=_attempted, detail=detail)}
 
             reply = _apply_email_style_mechanics(_extract_reply(reply or ""))
             if not reply:
-                return {"success": False, "error": "LLM returned empty response"}
+                return {"success": False, "error": t("email.llm_returned_empty")}
 
             # Cache so next click is instant
             if message_id:
@@ -3161,7 +3297,7 @@ def setup_email_routes():
             return {"success": True, "reply": reply, "model_used": model}
         except Exception as e:
             logger.error(f"Failed to generate AI reply: {e}")
-            return {"success": False, "error": "Mail operation failed"}
+            return {"success": False, "error": t("email.operation_failed")}
 
     @router.get("/style")
     async def get_writing_style(owner: str = Depends(require_user)):
@@ -3328,7 +3464,13 @@ def setup_email_routes():
         import uuid as _uuid
         name = (data.get("name") or "").strip()
         if not name:
-            return {"ok": False, "error": "name required"}
+            return {"ok": False, "error": t("email.name_required")}
+        imap_port, port_err = _coerce_port(data.get("imap_port"), 993)
+        if port_err:
+            return {"ok": False, "error": port_err}
+        smtp_port, port_err = _coerce_port(data.get("smtp_port"), 465)
+        if port_err:
+            return {"ok": False, "error": port_err}
         db = SessionLocal()
         try:
             row = EmailAccount(
@@ -3337,13 +3479,13 @@ def setup_email_routes():
                 is_default=bool(data.get("is_default", False)),
                 enabled=bool(data.get("enabled", True)),
                 imap_host=(data.get("imap_host") or "").strip(),
-                imap_port=int(data.get("imap_port") or 993),
+                imap_port=imap_port,
                 imap_user=(data.get("imap_user") or "").strip(),
                 imap_password=_enc(data.get("imap_password") or ""),
                 imap_starttls=bool(data.get("imap_starttls", True)),
                 smtp_host=(data.get("smtp_host") or "").strip(),
-                smtp_port=int(data.get("smtp_port") or 465),
-                smtp_security=_smtp_security_mode({"smtp_security": data.get("smtp_security"), "smtp_port": data.get("smtp_port") or 465}),
+                smtp_port=smtp_port,
+                smtp_security=_smtp_security_mode({"smtp_security": data.get("smtp_security"), "smtp_port": smtp_port}),
                 smtp_user=(data.get("smtp_user") or "").strip(),
                 smtp_password=_enc(data.get("smtp_password") or ""),
                 from_address=(data.get("from_address") or "").strip(),
@@ -3380,14 +3522,17 @@ def setup_email_routes():
         try:
             row = db.get(EmailAccount, account_id)
             if not row:
-                return {"ok": False, "error": "Account not found"}
+                return {"ok": False, "error": t("email.account_not_found")}
             # Simple fields
             for key in ("name", "imap_host", "imap_user", "smtp_host", "smtp_user", "from_address", "display_name"):
                 if key in data:
                     setattr(row, key, (data[key] or "").strip())
             for key in ("imap_port", "smtp_port"):
                 if data.get(key) not in (None, ""):
-                    setattr(row, key, int(data[key]))
+                    port, port_err = _coerce_port(data.get(key), None)
+                    if port_err:
+                        return {"ok": False, "error": port_err}
+                    setattr(row, key, port)
             if "smtp_security" in data:
                 row.smtp_security = _smtp_security_mode({"smtp_security": data.get("smtp_security"), "smtp_port": data.get("smtp_port") or row.smtp_port})
             for key in ("imap_starttls", "enabled"):
@@ -3413,7 +3558,7 @@ def setup_email_routes():
         try:
             row = db.get(EmailAccount, account_id)
             if not row:
-                return {"ok": False, "error": "Account not found"}
+                return {"ok": False, "error": t("email.account_not_found")}
             was_default = bool(row.is_default)
             db.delete(row)
             db.commit()
@@ -3447,7 +3592,7 @@ def setup_email_routes():
         try:
             body = await req.json()
         except Exception:
-            return {"ok": False, "imap": {"ok": False, "error": "invalid request body"}}
+            return {"ok": False, "imap": {"ok": False, "error": t("email.invalid_request_body")}}
 
         # Saved-account shortcut — hydrate missing credentials from the DB row,
         # while keeping any edited form fields from the request. This lets the UI
@@ -3465,7 +3610,7 @@ def setup_email_routes():
             try:
                 row = db.get(EmailAccount, acc_id)
                 if not row:
-                    return {"ok": False, "imap": {"ok": False, "error": "Account not found"}}
+                    return {"ok": False, "imap": {"ok": False, "error": t("email.account_not_found")}}
                 saved_body = {
                     "imap_host": row.imap_host or "",
                     "imap_port": row.imap_port or 993,
@@ -3491,13 +3636,15 @@ def setup_email_routes():
         smtp_result = None
 
         imap_host = (body.get("imap_host") or "").strip()
-        imap_port = int(body.get("imap_port") or 993)
+        imap_port, imap_port_err = _coerce_port(body.get("imap_port"), 993)
         imap_user = (body.get("imap_user") or "").strip()
         imap_pass = body.get("imap_password") or ""
         imap_starttls = bool(body.get("imap_starttls"))
 
-        if not (imap_host and imap_user and imap_pass):
-            imap_result = {"ok": False, "error": "Need IMAP host, username, and password"}
+        if imap_port_err:
+            imap_result = {"ok": False, "error": imap_port_err}
+        elif not (imap_host and imap_user and imap_pass):
+            imap_result = {"ok": False, "error": t("email.need_imap_credentials")}
         else:
             # Connection mode resolution:
             #   STARTTLS on  → plain IMAP4 + .starttls() (upgrade)
@@ -3523,8 +3670,10 @@ def setup_email_routes():
                 imap_result = {"ok": False, "error": _friendly_email_auth_error("IMAP", imap_host, e)}
 
         smtp_host = (body.get("smtp_host") or "").strip()
-        if smtp_host:
-            smtp_port = int(body.get("smtp_port") or 465)
+        smtp_port, smtp_port_err = _coerce_port(body.get("smtp_port"), 465)
+        if smtp_host and smtp_port_err:
+            smtp_result = {"ok": False, "error": smtp_port_err}
+        elif smtp_host:
             smtp_security = _smtp_security_mode({"smtp_security": body.get("smtp_security"), "smtp_port": smtp_port})
             smtp_user = (body.get("smtp_user") or imap_user).strip()
             smtp_pass = body.get("smtp_password") or imap_pass
@@ -3558,7 +3707,7 @@ def setup_email_routes():
         try:
             row = db.get(EmailAccount, account_id)
             if not row:
-                return {"ok": False, "error": "Account not found"}
+                return {"ok": False, "error": t("email.account_not_found")}
             # SECURITY: scope the "clear other defaults" sweep to this user's
             # accounts so we don't unset another user's default flag.
             clear_q = db.query(EmailAccount)
@@ -3579,7 +3728,7 @@ def setup_email_routes():
         _assert_owns_account(account_id, owner)
         client_id = os.environ.get("GOOGLE_OAUTH_CLIENT_ID", "")
         if not client_id:
-            raise HTTPException(400, "GOOGLE_OAUTH_CLIENT_ID not set — add it to .env")
+            raise HTTPException(400, t("email.oauth_client_id_missing"))
         redirect_uri = (
             os.environ.get("GOOGLE_OAUTH_REDIRECT_URI")
             or f"http://{request.headers.get('host', 'localhost:7000')}/api/email/oauth/google/callback"

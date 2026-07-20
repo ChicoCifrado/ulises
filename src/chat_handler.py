@@ -7,6 +7,7 @@ from typing import Dict, List, Optional, Any
 
 from fastapi import HTTPException
 
+from core.translations import t
 from src.constants import (
     MAX_CONTEXT_MESSAGES,
     DEFAULT_TEMPERATURE,
@@ -55,7 +56,7 @@ class ChatHandler:
     def validate_and_extract_preset(self, preset_id: Optional[str]) -> tuple:
         """Returns (temperature, max_tokens, preset_system_prompt, character_name)."""
         if preset_id and preset_id not in self.preset_manager.presets:
-            raise HTTPException(400, f"Invalid preset_id: {preset_id}")
+            raise HTTPException(400, t("chat.invalid_preset_id").format(preset_id=preset_id))
 
         temperature = DEFAULT_TEMPERATURE
         max_tokens = DEFAULT_MAX_TOKENS

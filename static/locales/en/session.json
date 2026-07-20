@@ -1,0 +1,14 @@
+{
+  "session": {
+    "unstar_before_delete": "Unstar the session before deleting it",
+    "delete_failed": "Failed to delete session",
+    "delete_bulk_failed": "Failed to delete sessions",
+    "archive_failed": "Failed to archive session",
+    "unarchive_failed": "Failed to unarchive session",
+    "importance_update_failed": "Failed to update session importance",
+    "no_unfiled": "No unfiled sessions to sort",
+    "errors": {
+      "topic_analysis_failed": "Topic analysis failed: {{error}}"
+    }
+  }
+}

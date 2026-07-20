@@ -15,6 +15,7 @@
  *   showToast:   (msg: string) => void,
  * }} deps
  */
+import { t } from '../../i18n.js';
 import { state } from '../state.js';
 import { canvasCoords } from '../canvas-coords.js';
 
@@ -50,13 +51,13 @@ export function createCloneTool({ activeLayer, saveState, strokeTo, showToast })
         state.cloneSourceY = coords.y;
         state.cloneSourceLayerId = (layer && layer.id) || state.activeLayerId;
         state.cloneSourceSnapshot = null; // captured at first stroke
-        showToast('Clone source set');
+        showToast(t('document.editor.clone_source_set'));
         return;
       }
       if (state.cloneSourceX === null || state.cloneSourceY === null) {
-        showToast(isTouchEvt
-          ? 'Double-tap first to set a clone source'
-          : 'Alt-click first to set a clone source');
+        showToast(t(isTouchEvt
+          ? 'document.editor.clone_double_tap_first'
+          : 'document.editor.clone_alt_click_first'));
         return;
       }
       if (!layer || layer.locked) return;

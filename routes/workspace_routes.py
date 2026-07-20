@@ -2,6 +2,7 @@
 import os
 from fastapi import APIRouter, Request, HTTPException, Query
 
+from core.translations import t
 from src.auth_helpers import get_current_user
 from src.tool_security import owner_is_admin_or_single_user
 
@@ -26,7 +27,7 @@ def setup_workspace_routes():
         """
         owner = get_current_user(request)
         if not owner_is_admin_or_single_user(owner):
-            raise HTTPException(status_code=403, detail="Workspace browsing is admin-only")
+            raise HTTPException(status_code=403, detail=t("admin.workspace_admin_only"))
 
         # Resolve symlinks so the reported path is canonical and the UI navigates
         # real directories (defends against symlink games in displayed paths).
@@ -77,7 +78,7 @@ def setup_workspace_routes():
         """
         owner = get_current_user(request)
         if not owner_is_admin_or_single_user(owner):
-            raise HTTPException(status_code=403, detail="Workspace selection is admin-only")
+            raise HTTPException(status_code=403, detail=t("admin.workspace_selection_admin"))
         from src.tool_execution import vet_workspace
         resolved = vet_workspace(path)
         return {"ok": resolved is not None, "path": resolved}

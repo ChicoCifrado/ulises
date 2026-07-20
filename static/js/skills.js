@@ -5,10 +5,10 @@
 // content), publish/draft toggle, delete, and "run as slash" via the
 // /<skill-name> path.
 
+import { t } from './i18n.js';
 import uiModule from './ui.js';
 import * as spinnerModule from './spinner.js';
-
-const API = window.location.origin;
+import { API_BASE } from './apiBase.js';
 let skills = [];
 let builtinSkills = [];   // read-only agent tool capabilities (TOOL_SECTIONS)
 let loaded = false;
@@ -34,7 +34,7 @@ function _playSkillsCascade(container = document.getElementById('skills-list')) 
 const _mdCache = new Map();
 async function _fetchSkillMarkdown(name) {
   if (_mdCache.has(name)) return _mdCache.get(name);
-  const res = await fetch(`${API}/api/skills/${encodeURIComponent(name)}/markdown`);
+  const res = await fetch(`${API_BASE}/api/skills/${encodeURIComponent(name)}/markdown`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const data = await res.json();
   const md = data.markdown || '';
@@ -89,9 +89,9 @@ export async function loadSkills(cascade = false) {
   if (_loadPromise) return _loadPromise;
   _loadPromise = (async () => {
   try {
-    const res = await fetch(`${API}/api/skills`);
+    const res = await fetch(`${API_BASE}/api/skills`);
     const data = await res.json();
-    // Dedupe by name (case-insensitive) — the API has occasionally
+    // Dedupe by name (case-insensitive) — the API_BASE has occasionally
     // returned the same skill twice (built-in shadow + user copy, or
     // a write-then-read race), and rendering both made the duplicate
     // detector mark BOTH entries as the "recommended" keeper.
@@ -545,7 +545,7 @@ async function _expandBuiltinCard(card, name) {
   if (pre && !card._loaded) {
     pre.textContent = 'Loading…';
     try {
-      const res = await fetch(`${API}/api/skills/builtin/${encodeURIComponent(name)}`);
+      const res = await fetch(`${API_BASE}/api/skills/builtin/${encodeURIComponent(name)}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       pre.textContent = data.text || '(empty)';
@@ -579,13 +579,13 @@ async function _saveBuiltinEdit(card, name) {
   const ta = card.querySelector('.skill-md-editor');
   if (!ta) return;
   try {
-    const res = await fetch(`${API}/api/skills/builtin/${encodeURIComponent(name)}`, {
+    const res = await fetch(`${API_BASE}/api/skills/builtin/${encodeURIComponent(name)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text: ta.value }),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    uiModule.showToast('Built-in capability updated');
+    uiModule.showToast(t('skills.builtin_updated'));
     builtinSkills = [];  // force reload of built-in list (refreshes "edited" badge)
     await loadSkills();
   } catch (e) { uiModule.showError('Save failed: ' + e.message); }
@@ -594,9 +594,9 @@ async function _saveBuiltinEdit(card, name) {
 async function _revertBuiltin(name) {
   if (!(await uiModule.styledConfirm(`Revert "${name}" to its original built-in instructions?`, { confirmText: 'Revert', danger: true }))) return;
   try {
-    const res = await fetch(`${API}/api/skills/builtin/${encodeURIComponent(name)}`, { method: 'DELETE' });
+    const res = await fetch(`${API_BASE}/api/skills/builtin/${encodeURIComponent(name)}`, { method: 'DELETE' });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    uiModule.showToast('Reverted to default');
+    uiModule.showToast(t('skills.builtin_reverted'));
     builtinSkills = [];
     await loadSkills();
   } catch (e) { uiModule.showError('Revert failed: ' + e.message); }
@@ -1056,7 +1056,7 @@ async function _saveSkillEdit(card, name) {
   const ta = preview?.querySelector('.skill-md-editor');
   if (!ta) return;
   try {
-    const res = await fetch(`${API}/api/skills/${encodeURIComponent(name)}/markdown`, {
+    const res = await fetch(`${API_BASE}/api/skills/${encodeURIComponent(name)}/markdown`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ markdown: ta.value }),
@@ -1064,7 +1064,7 @@ async function _saveSkillEdit(card, name) {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     // Refresh the cached markdown so the preload/expand show the new text.
     _mdCache.set(name, ta.value);
-    uiModule.showToast('Saved');
+    uiModule.showToast(t('common.saved'));
     await loadSkills();  // re-render (frontmatter changes like name/status may have changed)
   } catch (e) {
     uiModule.showError('Save failed: ' + e.message);
@@ -1081,7 +1081,7 @@ async function _deleteSkill(name, card = null) {
       .find(c => { const n = c.querySelector('.skill-card-name'); return n && n.textContent === name; }) || null;
   }
   try {
-    await fetch(`${API}/api/skills/${encodeURIComponent(name)}`, { method: 'DELETE' });
+    await fetch(`${API_BASE}/api/skills/${encodeURIComponent(name)}`, { method: 'DELETE' });
     _mdCache.delete(name);
     if (card) {
       if (card._testPoll) { clearInterval(card._testPoll); card._testPoll = null; }
@@ -1091,19 +1091,19 @@ async function _deleteSkill(name, card = null) {
       setTimeout(() => { if (card.parentElement) card.remove(); }, 400);
     }
     await loadSkills();
-    uiModule.showToast('Skill deleted');
+    uiModule.showToast(t('skills.deleted'));
   } catch (e) { uiModule.showError('Delete failed: ' + e.message); }
 }
 
 async function _setSkillStatus(name, status) {
   try {
-    await fetch(`${API}/api/skills/${encodeURIComponent(name)}`, {
+    await fetch(`${API_BASE}/api/skills/${encodeURIComponent(name)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status }),
     });
     await loadSkills();
-    uiModule.showToast(status === 'published' ? 'Skill approved' : 'Skill moved to draft');
+    uiModule.showToast(status === 'published' ? t('skills.approved') : t('skills.moved_to_draft'));
   } catch (e) { uiModule.showError('Update failed: ' + e.message); }
 }
 
@@ -1111,7 +1111,7 @@ async function _setSkillStatus(name, status) {
 
 async function _fetchTestStatus(name) {
   try {
-    const r = await fetch(`${API}/api/skills/${encodeURIComponent(name)}/test-status`);
+    const r = await fetch(`${API_BASE}/api/skills/${encodeURIComponent(name)}/test-status`);
     return r.ok ? await r.json() : { status: 'none' };
   } catch { return { status: 'none' }; }
 }
@@ -1159,7 +1159,7 @@ async function _testSkill(card, name, force = false) {
       endpoint_url = (sm && sm.getCurrentEndpointUrl && sm.getCurrentEndpointUrl()) || '';
     } catch (_) {}
     try {
-      const res = await fetch(`${API}/api/skills/${encodeURIComponent(name)}/test`, {
+      const res = await fetch(`${API_BASE}/api/skills/${encodeURIComponent(name)}/test`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ model, endpoint_url }),
       });
@@ -1434,13 +1434,13 @@ async function _auditAllSkills(opts = {}) {
       ? `${names.length} selected ${names.length === 1 ? 'skill' : 'skills'}`
       : `${names.length} visible ${names.length === 1 ? 'skill' : 'skills'}`;
     if (!names.length) {
-      uiModule.showToast(explicitNames ? 'No selected skills to audit' : 'No visible skills to audit');
+      uiModule.showToast(t('skills.no_skills_to_audit'));
       return;
     }
     const confirmed = await _confirmAuditSkills(label);
     if (!confirmed.ok) return;
     try {
-      const r = await fetch(`${API}/api/skills/audit-all`, {
+      const r = await fetch(`${API_BASE}/api/skills/audit-all`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ scope: explicitNames ? 'selected' : 'all', names, skip_audited: confirmed.skipAudited }),
       });
@@ -1544,7 +1544,7 @@ function _highlightAuditCard(name) {
 
 async function _fetchAuditStatus() {
   try {
-    const r = await fetch(`${API}/api/skills/audit-all/status`);
+    const r = await fetch(`${API_BASE}/api/skills/audit-all/status`);
     return r.ok ? await r.json() : { status: 'none' };
   } catch { return { status: 'none' }; }
 }
@@ -1590,7 +1590,7 @@ function _renderAuditPanel(panel, st) {
     cancel.disabled = true;
     cancel.textContent = 'Cancelling...';
     try {
-      await fetch(`${API}/api/skills/audit-all/cancel`, { method: 'POST', credentials: 'same-origin' });
+      await fetch(`${API_BASE}/api/skills/audit-all/cancel`, { method: 'POST', credentials: 'same-origin' });
       const s = await _fetchAuditStatus();
       _renderAuditPanel(panel, { ...s, status: s.status === 'none' ? 'cancelled' : s.status });
       _highlightAuditCard(null);
@@ -1679,7 +1679,7 @@ async function _bulkDelete() {
   const deletedNames = [];
   for (const name of _selectedNames) {
     try {
-      const res = await fetch(`${API}/api/skills/${encodeURIComponent(name)}`, { method: 'DELETE' });
+      const res = await fetch(`${API_BASE}/api/skills/${encodeURIComponent(name)}`, { method: 'DELETE' });
       if (res.ok) {
         deleted++;
         deletedNames.push(name);
@@ -1693,12 +1693,12 @@ async function _bulkDelete() {
   if (deletedNames.length) await new Promise(resolve => setTimeout(resolve, 320));
   _exitSelectMode();
   await loadSkills();
-  uiModule.showToast(`Deleted ${deleted}`);
+  uiModule.showToast(t('skills.deleted_format', { count: deleted }));
 }
 
 async function _loadSkillApprovalThreshold() {
   try {
-    const res = await fetch(`${API}/api/prefs`, { credentials: 'same-origin' });
+    const res = await fetch(`${API_BASE}/api/prefs`, { credentials: 'same-origin' });
     if (!res.ok) return;
     const prefs = await res.json();
     const raw = prefs.skill_min_confidence ?? prefs.skill_autosave_min_confidence;
@@ -1723,7 +1723,7 @@ function _selectedNonPassingSkills() {
 async function _bulkDeleteNonPassing() {
   const targets = _selectedNonPassingSkills();
   if (!targets.length) {
-    uiModule.showToast('No selected non-passing skills');
+    uiModule.showToast(t('skills.no_nonpassing'));
     return;
   }
   const thresholdPct = Math.round(_skillApprovalThreshold * 100);
@@ -1737,7 +1737,7 @@ async function _bulkDeleteNonPassing() {
   const deletedNames = [];
   for (const name of names) {
     try {
-      const res = await fetch(`${API}/api/skills/${encodeURIComponent(name)}`, { method: 'DELETE' });
+      const res = await fetch(`${API_BASE}/api/skills/${encodeURIComponent(name)}`, { method: 'DELETE' });
       if (res.ok) {
         deleted++;
         deletedNames.push(name);
@@ -1752,7 +1752,7 @@ async function _bulkDeleteNonPassing() {
   if (deletedNames.length) await new Promise(resolve => setTimeout(resolve, 320));
   _exitSelectMode();
   await loadSkills();
-  uiModule.showToast(`Deleted ${deleted} non-passing`);
+  uiModule.showToast(t('skills.deleted_nonpassing_format', { count: deleted }));
 }
 
 async function _bulkApprove() {
@@ -1762,7 +1762,7 @@ async function _bulkApprove() {
     const sk = skills.find(s => (s.name || s.id) === name);
     if (sk && sk.status === 'published') continue;
     try {
-      const res = await fetch(`${API}/api/skills/${encodeURIComponent(name)}`, {
+      const res = await fetch(`${API_BASE}/api/skills/${encodeURIComponent(name)}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: 'published' }),
@@ -1772,7 +1772,7 @@ async function _bulkApprove() {
   }
   _exitSelectMode();
   await loadSkills();
-  uiModule.showToast(`Published ${published}`);
+  uiModule.showToast(t('skills.published_format', { count: published }));
 }
 
 async function _bulkAudit() {
@@ -1788,7 +1788,7 @@ async function _bulkAudit() {
 async function _showSkillSource(name) {
   let md = '';
   try {
-    const res = await fetch(`${API}/api/skills/${encodeURIComponent(name)}/markdown`);
+    const res = await fetch(`${API_BASE}/api/skills/${encodeURIComponent(name)}/markdown`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     md = data.markdown || '';
@@ -1827,13 +1827,13 @@ async function _showSkillSource(name) {
       // tool call instead. We have a /api/skills/{name} PUT for fields, but
       // a full SKILL.md replace is simpler via the parsed-then-PUT approach
       // below: parse client-side by uploading via the tool route.
-      const res = await fetch(`${API}/api/skills/${encodeURIComponent(name)}/markdown`, {
+      const res = await fetch(`${API_BASE}/api/skills/${encodeURIComponent(name)}/markdown`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ markdown: ta.value }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      uiModule.showToast('Saved');
+      uiModule.showToast(t('common.saved'));
       wrap.remove();
       await loadSkills();
     } catch (e) {
@@ -1852,7 +1852,7 @@ async function importSkillFromUrl() {
   const btn = document.getElementById('skill-import-url-btn');
   if (btn) btn.disabled = true;
   try {
-    const res = await fetch(`${API}/api/skills/import-from-url`, {
+    const res = await fetch(`${API_BASE}/api/skills/import-from-url`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url }),
@@ -1862,7 +1862,7 @@ async function importSkillFromUrl() {
     if (input) input.value = '';
     await loadSkills();
     const name = data.skill?.name || 'skill';
-    uiModule.showToast(`Imported ${name} (${data.files || 1} file(s))`);
+    uiModule.showToast(t('skills.imported_format', { name, files: data.files || 1 }));
     if (name) openSkill(name);
   } catch (err) {
     uiModule.showError('Import failed: ' + err.message);
@@ -1893,7 +1893,7 @@ async function addSkill() {
   const tags = tagsRaw ? tagsRaw.split(',').map(t => t.trim()).filter(Boolean) : [];
 
   try {
-    const res = await fetch(`${API}/api/skills/add`, {
+    const res = await fetch(`${API_BASE}/api/skills/add`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1912,7 +1912,7 @@ async function addSkill() {
      'new-skill-category']
       .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
     await loadSkills();
-    uiModule.showToast('Skill added (draft)');
+    uiModule.showToast(t('skills.added_draft'));
   } catch (err) {
     uiModule.showError('Failed to add skill: ' + err.message);
   }

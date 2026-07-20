@@ -1,0 +1,19 @@
+{
+  "research": {
+    "not_authenticated": "Not authenticated",
+    "invalid_session_id": "Invalid session ID format",
+    "no_research": "No research found for this session",
+    "no_result": "No research result available",
+    "not_found": "Research not found",
+    "report_failed": "Report generation failed: {error}",
+    "no_report": "No visual report available for this session",
+    "read_failed": "Failed to read research: {error}",
+    "update_failed": "Failed to update research: {error}",
+    "not_allowed": "Your account is not allowed to use research.",
+    "endpoint_not_found": "Endpoint not found or disabled",
+    "endpoint_no_model": "Endpoint is not configured with a usable model.",
+    "no_endpoints": "No endpoints configured. Add one in Settings first.",
+    "no_endpoint_configured": "No endpoint configured — add one in Settings first",
+    "session_manager_not_configured": "Session manager not configured"
+  }
+}

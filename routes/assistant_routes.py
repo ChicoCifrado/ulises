@@ -15,6 +15,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from core.database import SessionLocal, CrewMember, ScheduledTask
+from core.translations import t
 from src.auth_helpers import get_current_user
 from core.auth import RESERVED_USERNAMES
 from src.task_scheduler import compute_next_run
@@ -83,7 +84,7 @@ def setup_assistant_routes(task_scheduler) -> APIRouter:
     def _owner(request: Request) -> str:
         owner = get_current_user(request)
         if not owner:
-            raise HTTPException(status_code=401, detail="Not authenticated")
+            raise HTTPException(status_code=401, detail=t("assistant.not_authenticated"))
         return owner
 
     # Synthetic / non-human owners that should NEVER get an assistant +
@@ -95,7 +96,7 @@ def setup_assistant_routes(task_scheduler) -> APIRouter:
     async def _get_or_create(owner: str) -> CrewMember:
         """Return the per-owner assistant CrewMember, creating it on demand."""
         if not owner or owner in RESERVED_USERNAMES:
-            raise HTTPException(status_code=400, detail=f"Cannot seed assistant for {owner!r}")
+            raise HTTPException(status_code=400, detail=t("assistant.cannot_seed").format(owner=repr(owner)))
         db = SessionLocal()
         try:
             crew = db.query(CrewMember).filter(
@@ -125,7 +126,7 @@ def setup_assistant_routes(task_scheduler) -> APIRouter:
         owner = _owner(request)
         crew = await _get_or_create(owner)
         if not crew or not crew.session_id:
-            raise HTTPException(status_code=500, detail="Assistant session could not be resolved")
+            raise HTTPException(status_code=500, detail=t("assistant.could_not_resolve"))
         return {
             "session_id": crew.session_id,
             "crew_member_id": crew.id,
@@ -138,7 +139,7 @@ def setup_assistant_routes(task_scheduler) -> APIRouter:
         owner = _owner(request)
         crew = await _get_or_create(owner)
         if not crew:
-            raise HTTPException(status_code=500, detail="Assistant not available")
+            raise HTTPException(status_code=500, detail=t("assistant.not_available"))
         db = SessionLocal()
         try:
             tasks = db.query(ScheduledTask).filter(
@@ -159,13 +160,13 @@ def setup_assistant_routes(task_scheduler) -> APIRouter:
         owner = _owner(request)
         crew = await _get_or_create(owner)
         if not crew:
-            raise HTTPException(status_code=500, detail="Assistant not available")
+            raise HTTPException(status_code=500, detail=t("assistant.not_available"))
 
         db = SessionLocal()
         try:
             crew_db = db.query(CrewMember).filter(CrewMember.id == crew.id).first()
             if not crew_db:
-                raise HTTPException(status_code=404, detail="Assistant not found")
+                raise HTTPException(status_code=404, detail=t("assistant.not_found"))
 
             # Update CrewMember fields.
             if payload.name is not None:
@@ -276,13 +277,13 @@ def setup_assistant_routes(task_scheduler) -> APIRouter:
                 ScheduledTask.owner == owner,
             ).first()
             if not task:
-                raise HTTPException(status_code=404, detail="Task not found")
+                raise HTTPException(status_code=404, detail=t("assistant.task_not_found"))
             crew = db.query(CrewMember).filter(
                 CrewMember.id == task.crew_member_id,
                 CrewMember.is_default_assistant == True,  # noqa: E712
             ).first()
             if not crew:
-                raise HTTPException(status_code=400, detail="Not an assistant task")
+                raise HTTPException(status_code=400, detail=t("assistant.not_assistant_task"))
         finally:
             db.close()
         started = await task_scheduler.run_task_now(task_id)
@@ -299,9 +300,9 @@ def setup_assistant_routes(task_scheduler) -> APIRouter:
             # this any authenticated user could poll the status of any task_id.
             task = db.query(ScheduledTask).filter(ScheduledTask.id == task_id).first()
             if not task:
-                raise HTTPException(404, "Task not found")
+                raise HTTPException(404, detail=t("assistant.task_not_found"))
             if user and task.owner != user:
-                raise HTTPException(404, "Task not found")
+                raise HTTPException(404, detail=t("assistant.task_not_found"))
             run = db.query(TaskRun).filter(
                 TaskRun.task_id == task_id,
             ).order_by(TaskRun.started_at.desc()).first()

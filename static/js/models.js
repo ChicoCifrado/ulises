@@ -12,6 +12,7 @@ import spinnerModule from './spinner.js';
 import { modelColor } from './chatRenderer.js';
 import { providerLogo } from './providers.js';
 import { sortModelIds } from './modelSort.js';
+import { t } from './i18n.js';
 
 let API_BASE = '';
 let _cachedItems = []; // cached /api/models items for model-switch dropdown
@@ -82,7 +83,7 @@ function _startChat(url, mid, endpointId) {
   if (sessionModule) {
     sessionModule.createDirectChat(url, mid, endpointId);
   } else if (uiModule) {
-    uiModule.showError('Session module not loaded');
+    uiModule.showError(t('models.session_not_loaded'));
   }
 }
 
@@ -95,7 +96,7 @@ function _buildModelRow(mid, url, displayName, endpointId, offline, modelType) {
   const handle = document.createElement('span');
   handle.className = 'item-drag-handle';
   handle.textContent = '\u22EE\u22EE';
-  handle.title = 'Drag to reorder';
+  handle.title = t('models.drag_reorder');
   row.appendChild(handle);
 
   // Favorite indicator — provider logo or colored dot
@@ -109,12 +110,12 @@ function _buildModelRow(mid, url, displayName, endpointId, offline, modelType) {
   } else {
     fav.className = 'model-fav-btn' + (_isFavorite(mid) ? ' active' : '');
   }
-  fav.title = 'Toggle favorite';
+  fav.title = t('models.toggle_favorite');
   fav.addEventListener('click', (e) => {
     e.stopPropagation();
     const nowFav = _toggleFavorite(mid);
     fav.classList.toggle('active', nowFav);
-    uiModule.showToast(nowFav ? 'Favorited' : 'Unfavorited');
+    uiModule.showToast(nowFav ? t('models.favorited') : t('models.unfavorited'));
     refreshModels();
   });
   const span = document.createElement('span');
@@ -124,14 +125,14 @@ function _buildModelRow(mid, url, displayName, endpointId, offline, modelType) {
     const badge = document.createElement('span');
     badge.className = 'model-type-badge';
     badge.textContent = 'IMG';
-    badge.title = 'Image generation model';
+    badge.title = t('models.image_gen_model');
     badge.style.cssText = 'font-size:0.65em;padding:1px 4px;border-radius:3px;background:var(--accent,#7c3aed);color:#fff;margin-left:6px;vertical-align:middle;';
     span.appendChild(badge);
   }
 
   const btn = document.createElement('button');
   btn.type = 'button';
-  btn.textContent = offline ? 'Offline' : (modelType === 'image' ? '+ Image' : '+ Chat');
+  btn.textContent = offline ? t('models.offline') : (modelType === 'image' ? t('models.plus_image') : t('models.plus_chat'));
   btn.className = 'model-chat-btn';
   btn.style.transition = 'all 0.2s ease';
   if (offline) {
@@ -184,7 +185,7 @@ export async function refreshModels(force = false) {
         // back — newly-served endpoints don't appear until the cache
         // ages out. (Bug repro: serve a model, picker is empty for ~30s
         // even though the endpoint is in the DB and online.)
-        const _url = `${API_BASE}/api/models` + (force ? '?refresh=true' : '');
+        const _url = `${API_BASE}/api/models` + (force ? '?refresh=true' : '?background=false');
         _fetchInflight = fetch(_url, { credentials: 'same-origin' })
           .then(async (res) => {
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -197,7 +198,7 @@ export async function refreshModels(force = false) {
       _cachedItems = data.items || [];
     } catch (e) {
       console.error(e);
-      box.textContent = '(scan failed)';
+      box.textContent = t('models.scan_failed');
       return;
     } finally {
       box.innerHTML = '';
@@ -281,7 +282,7 @@ export async function refreshModels(force = false) {
         favToggle.textContent = favCollapsed ? '\u25B6' : '\u25BC';
         favHeader.appendChild(favToggle);
         const favLabel = document.createElement('span');
-        favLabel.textContent = 'Favorites';
+        favLabel.textContent = t('models.favorites');
         favHeader.appendChild(favLabel);
         const favCount = document.createElement('span');
         favCount.className = 'folder-count';
@@ -442,7 +443,7 @@ export async function refreshModels(force = false) {
           const showMoreBtn = document.createElement('div');
           showMoreBtn.className = 'models-show-all-btn';
           showMoreBtn.style.cssText = 'text-align:center;padding:6px;opacity:0.5;cursor:pointer;font-size:0.82em;';
-          showMoreBtn.textContent = `Show ${allHidden.length} more model${allHidden.length === 1 ? '' : 's'}`;
+          showMoreBtn.textContent = t(allHidden.length === 1 ? 'models.show_more' : 'models.show_more_plural', { n: allHidden.length });
           showMoreBtn._target = target;
           showMoreBtn.addEventListener('click', () => {
             showMoreBtn.remove();
@@ -505,7 +506,7 @@ export async function refreshModels(force = false) {
     if (totalModelCount >= 10) {
       const searchBox = document.createElement('input');
       searchBox.type = 'text';
-      searchBox.placeholder = 'Search models...';
+      searchBox.placeholder = t('models.search_placeholder');
       searchBox.className = 'model-search-input';
       searchBox.addEventListener('click', (e) => e.stopPropagation());
       searchBox.addEventListener('touchstart', (e) => e.stopPropagation());
@@ -548,7 +549,7 @@ export async function refreshModels(force = false) {
         if (searchResults.children.length === 0) {
           const empty = document.createElement('div');
           empty.style.cssText = 'text-align:center;padding:12px;opacity:0.4;';
-          empty.textContent = 'No models match "' + searchBox.value.trim() + '"';
+          empty.textContent = t('models.no_match', { q: searchBox.value.trim() });
           searchResults.appendChild(empty);
         }
       });
@@ -559,45 +560,45 @@ export async function refreshModels(force = false) {
       const noModels = document.createElement('div');
       noModels.className = 'models-empty-state';
       if (window._isAdmin) {
-        noModels.innerHTML = '<span class="muted">No models found</span><br>'
-          + '<a href="#" onclick="document.getElementById(\'user-bar-admin\')?.click();return false;" class="accent-link">Open Admin to add endpoints</a>'
-          + '<br><span class="muted-sm">Type /setup for Local models or API setup.</span>';
+        noModels.innerHTML = '<span class="muted">' + t('models.no_models_admin') + '</span><br>'
+          + '<a href="#" onclick="document.getElementById(\'user-bar-admin\')?.click();return false;" class="accent-link">' + t('models.open_admin') + '</a>'
+          + '<br><span class="muted-sm">' + t('models.setup_hint') + '</span>';
       } else {
-        noModels.innerHTML = '<span class="muted">No models available</span><br>'
-          + '<span class="muted-sm">Ask an admin to configure model endpoints</span>';
+        noModels.innerHTML = '<span class="muted">' + t('models.no_models_user') + '</span><br>'
+          + '<span class="muted-sm">' + t('models.ask_admin') + '</span>';
       }
       box.appendChild(noModels);
       // No endpoints yet: keep the welcome screen focused on first setup.
       const welcomeSub = document.getElementById('welcome-sub');
-      if (welcomeSub) welcomeSub.innerHTML = 'Type <span class="setup-trigger-link" style="color:var(--accent,var(--red));font-weight:600;cursor:pointer;text-decoration:underline;" title="Click to launch setup">/setup</span> to get started.';
+      if (welcomeSub) welcomeSub.innerHTML = t('models.setup_get_started');
       const welcomeTip = document.getElementById('welcome-tip');
-      if (welcomeTip) welcomeTip.textContent = 'Type /setup, then choose Local models or API.';
+      if (welcomeTip) welcomeTip.textContent = t('models.setup_tip');
     } else {
       // Configured installs should feel ready, not stuck in onboarding.
       const welcomeSub = document.getElementById('welcome-sub');
-      if (welcomeSub) welcomeSub.textContent = 'Yours for the voyage.';
+      if (welcomeSub) welcomeSub.textContent = t('models.yours_for_voyage');
       const welcomeTip = document.getElementById('welcome-tip');
       if (welcomeTip) {
         const tips = window.innerWidth <= 768
           ? [
-              'Tip: Long-press a session for rename, delete, and memory options.',
-              'Tip: Tap the eye icon for Nobody mode - no history saved.',
-              'Tip: Switch to Agent mode when you want tools.',
-              'Tip: Attach images or files using the + button next to the input.',
+              t('models.tip_long_press'),
+              t('models.tip_nobody_mode'),
+              t('models.tip_agent_mode'),
+              t('models.tip_attach_files'),
             ]
           : [
-              'Tip: Press Ctrl+K to search across all your conversations.',
-              'Tip: Press Ctrl+B to quickly toggle the sidebar.',
-              'Tip: Shift-click the sidebar toggle to swap it to the other side.',
-              'Tip: Drag and drop files onto the chat to attach them.',
-              'Tip: Right-click a session for rename, delete, and memory options.',
+              t('models.tip_ctrl_k'),
+              t('models.tip_ctrl_b'),
+              t('models.tip_shift_click'),
+              t('models.tip_drag_drop'),
+              t('models.tip_right_click'),
             ];
         welcomeTip.textContent = tips[Math.floor(Math.random() * tips.length)];
       }
     }
   } catch (e) {
     console.error(e);
-    box.textContent = '(render failed: ' + e.message + ')';
+    box.textContent = t('models.render_failed', { msg: e.message });
   }
 }
 
@@ -608,7 +609,7 @@ export async function refreshProviders() {
   const sel = document.getElementById('openai-model');
   if (!sel) return; // Exit if element doesn't exist
 
-  sel.innerHTML = '<option disabled>Loading providers…</option>';
+  sel.innerHTML = '<option disabled>' + t('models.loading_providers') + '</option>';
 
   try {
     const res = await fetch(`${API_BASE}/api/providers`);
@@ -628,7 +629,7 @@ export async function refreshProviders() {
     } else {
       const opt = document.createElement('option');
       opt.value = '';
-      opt.textContent = '(OPENAI_API_KEY not set on server)';
+      opt.textContent = t('models.api_key_not_set');
       sel.appendChild(opt);
     }
   } catch (e) {

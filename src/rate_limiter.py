@@ -12,7 +12,7 @@ class RateLimiter:
     Usage:
         limiter = RateLimiter(max_requests=5, window_seconds=60)
         if not limiter.check(ip):
-            raise HTTPException(429, "Too many requests")
+            raise HTTPException(429, t("common.errors.too_many_requests"))
     """
 
     def __init__(self, max_requests: int, window_seconds: int):

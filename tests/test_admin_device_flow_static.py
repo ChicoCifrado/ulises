@@ -15,8 +15,12 @@ def _between(src: str, start: str, end: str) -> str:
 
 
 def test_copilot_and_chatgpt_subscription_are_dropdown_device_auth_options():
-    assert 'value="copilot" data-logo="github" data-auth-flow="copilot">GitHub Copilot' in _INDEX
-    assert 'value="chatgpt-subscription" data-logo="openai" data-auth-flow="chatgpt-subscription">ChatGPT Subscription' in _INDEX
+    assert 'data-auth-flow="copilot"' in _INDEX
+    assert 'data-logo="github"' in _INDEX
+    assert 'value="copilot"' in _INDEX
+    assert 'data-auth-flow="chatgpt-subscription"' in _INDEX
+    assert 'data-logo="openai"' in _INDEX
+    assert 'value="chatgpt-subscription"' in _INDEX
     assert 'id="adm-deviceAuthStatus"' in _INDEX
 
 

@@ -9,6 +9,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Form, Depends
 from core.constants import EMBEDDING_ENDPOINT_FILE, FASTEMBED_CACHE_DIR
 from core.middleware import require_admin
+from core.translations import t
 from src.runtime_paths import get_app_root
 
 logger = logging.getLogger(__name__)
@@ -118,7 +119,7 @@ def setup_embedding_routes():
         try:
             from fastembed import TextEmbedding
         except ImportError:
-            raise HTTPException(503, "fastembed is not installed")
+            raise HTTPException(503, t("embedding.fastembed_not_installed"))
 
         active = _active_model()
         catalog = TextEmbedding.list_supported_models()
@@ -157,12 +158,12 @@ def setup_embedding_routes():
         try:
             from fastembed import TextEmbedding
         except ImportError:
-            raise HTTPException(503, "fastembed is not installed")
+            raise HTTPException(503, t("embedding.fastembed_not_installed"))
 
         # Validate model exists
         catalog = {m["model"]: m for m in TextEmbedding.list_supported_models()}
         if model_name not in catalog:
-            raise HTTPException(404, f"Unknown model: {model_name}")
+            raise HTTPException(404, t("embedding.unknown_model").format(model_name=model_name))
 
         hf_src = catalog[model_name].get("sources", {}).get("hf", "")
         if hf_src and _is_downloaded(hf_src):
@@ -183,7 +184,7 @@ def setup_embedding_routes():
             return {"status": "downloaded", "model": model_name}
         except Exception as e:
             logger.error(f"Failed to download {model_name}: {e}")
-            raise HTTPException(500, f"Download failed: {str(e)}")
+            raise HTTPException(500, t("embedding.download_failed").format(error=str(e)))
         finally:
             _downloading.pop(model_name, None)
 
@@ -193,11 +194,11 @@ def setup_embedding_routes():
         try:
             from fastembed import TextEmbedding
         except ImportError:
-            raise HTTPException(503, "fastembed is not installed")
+            raise HTTPException(503, t("embedding.fastembed_not_installed"))
 
         catalog = {m["model"]: m for m in TextEmbedding.list_supported_models()}
         if model_name not in catalog:
-            raise HTTPException(404, f"Unknown model: {model_name}")
+            raise HTTPException(404, t("embedding.unknown_model").format(model_name=model_name))
 
         hf_src = catalog[model_name].get("sources", {}).get("hf", "")
         downloaded = _is_downloaded(hf_src) if hf_src else False
@@ -212,30 +213,30 @@ def setup_embedding_routes():
     def delete_model(model_name: str):
         """Delete a cached model."""
         if model_name == _active_model():
-            raise HTTPException(400, "Cannot delete the active embedding model")
+            raise HTTPException(400, t("embedding.cannot_delete_active"))
 
         if model_name in _downloading:
-            raise HTTPException(400, "Model is currently downloading")
+            raise HTTPException(400, t("embedding.currently_downloading"))
 
         try:
             from fastembed import TextEmbedding
         except ImportError:
-            raise HTTPException(503, "fastembed is not installed")
+            raise HTTPException(503, t("embedding.fastembed_not_installed"))
 
         catalog = {m["model"]: m for m in TextEmbedding.list_supported_models()}
         if model_name not in catalog:
-            raise HTTPException(404, f"Unknown model: {model_name}")
+            raise HTTPException(404, t("embedding.unknown_model").format(model_name=model_name))
 
         hf_src = catalog[model_name].get("sources", {}).get("hf", "")
         if not hf_src:
-            raise HTTPException(400, "No cache source for this model")
+            raise HTTPException(400, t("embedding.no_cache_source"))
 
         try:
             model_path = _model_cache_path(hf_src)
         except ValueError as e:
             raise HTTPException(400, str(e))
         if not model_path.is_dir():
-            return {"deleted": False, "message": "Model not cached"}
+            return {"deleted": False, "message": t("embedding.not_cached")}
 
         shutil.rmtree(model_path)
         logger.info(f"Deleted cached model: {model_name} ({model_path})")
@@ -257,7 +258,7 @@ def setup_embedding_routes():
         """Save a custom embedding endpoint URL."""
         url = url.strip()
         if not url:
-            raise HTTPException(400, "URL is required")
+            raise HTTPException(400, t("embedding.url_required"))
 
         # SSRF hardening: validate the user-supplied URL before any outbound
         # request. Local-first means loopback/LAN endpoints are allowed by
@@ -269,7 +270,7 @@ def setup_embedding_routes():
             block_private=os.getenv("EMBEDDING_BLOCK_PRIVATE_IPS", "false").lower() == "true",
         )
         if not ok:
-            raise HTTPException(400, f"Rejected endpoint URL: {reason}")
+            raise HTTPException(400, t("embedding.rejected_url").format(reason=reason))
 
         # Quick health check
         try:
@@ -282,7 +283,7 @@ def setup_embedding_routes():
             )
             resp.raise_for_status()
         except Exception as e:
-            raise HTTPException(400, f"Endpoint unreachable: {e}")
+            raise HTTPException(400, t("embedding.unreachable").format(error=e))
 
         # Persist and set in environment for immediate use
         data = {"url": url}

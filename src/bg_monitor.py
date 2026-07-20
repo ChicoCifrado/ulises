@@ -14,6 +14,7 @@ import asyncio
 import json
 import logging
 
+from core.async_utils import safe_create_task
 from src import bg_jobs
 
 logger = logging.getLogger(__name__)
@@ -152,6 +153,6 @@ def start_bg_monitor():
     global _monitor_task
     if _monitor_task and not _monitor_task.done():
         return _monitor_task
-    _monitor_task = asyncio.create_task(_loop())
+    _monitor_task = safe_create_task(_loop(), name="bg-monitor")
     logger.info("Background-job monitor started (poll %ds)", POLL_INTERVAL_S)
     return _monitor_task

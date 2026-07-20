@@ -6,6 +6,7 @@ import themeModule from '../theme.js';
 import createResearchSynapse from '../researchSynapse.js';
 import spinnerModule from '../spinner.js';
 import { sortModelIds } from '../modelSort.js';
+import { t } from '../i18n.js';
 
 // Rotating research textarea placeholders — pick one at random each
 // time the panel is rendered so the example keeps feeling fresh.
@@ -49,7 +50,7 @@ function _toggleSynapseMinimized() {
     .forEach(h => h.classList.toggle('synapse-collapsed', _synapseMinimized));
   document.querySelectorAll('.research-synapse-toggle').forEach(b => {
     b.classList.toggle('active', _synapseMinimized);
-    b.title = _synapseMinimized ? 'Show visualization' : 'Minimize visualization';
+    b.title = _synapseMinimized ? t('research.show_viz') : t('research.minimize_viz');
     b.innerHTML = _synapseMinimized ? _vizExpandIcon : _vizCollapseIcon;
   });
 }
@@ -191,7 +192,7 @@ async function _updateResearchCount() {
     if (!res.ok) return;
     const data = await res.json();
     const n = data.total || 0;
-    el.textContent = n + (n === 1 ? ' research' : ' research');
+    el.textContent = n + ' ' + t('research.count_label');
   } catch {}
 }
 
@@ -566,7 +567,7 @@ async function _handleStart() {
         _wp.element.style.cssText += ';vertical-align:middle;margin-right:5px;position:relative;top:-1px;';
         startBtn.appendChild(_wp.element);
       } catch {}
-      startBtn.appendChild(document.createTextNode('Starting'));
+      startBtn.appendChild(document.createTextNode(t('research.starting')));
       startBtn.classList.add('research-start-busy');
     } else {
       startBtn.disabled = false;
@@ -597,7 +598,7 @@ async function _handleStart() {
   if (_mobile) _dismissKeyboard(queryEl); else queryEl.focus();
   _resetCategoryToAuto();
   jobs.startJob(query, settings).catch((e) => {
-    if (typeof uiModule !== 'undefined' && uiModule?.showError) uiModule.showError('Failed to start research');
+    if (typeof uiModule !== 'undefined' && uiModule?.showError) uiModule.showError(t('research.failed_start'));
     queryEl.value = query; // restore so user can retry
   });
 }
@@ -702,7 +703,7 @@ function _renderJobs() {
   const statsEl = document.getElementById('research-stats');
   if (statsEl) {
     const n = recentDone.length + past.length;
-    statsEl.textContent = n + ' research';
+    statsEl.textContent = n + ' ' + t('research.count_label');
   }
 
   // The main Start button doubles as "Start All (N)" when more than one job
@@ -771,10 +772,10 @@ function _renderJobs() {
     }
     // Both sections carry a "Clear all" button in the header (cookbook-running
     // section style); it clears all research and must not toggle the fold.
-    const clearAllHtml = '<button class="research-section-clear" title="Clear all research">' + _cancelIcon + ' Clear all</button>';
+    const clearAllHtml = '<button class="research-section-clear" title="' + t('research.clear_all_title') + '">' + _cancelIcon + ' ' + t('research.clear_all') + '</button>';
     header.innerHTML =
       '<span class="research-section-title">' + title + '</span>'
-      + '<span class="research-section-count memory-count">' + arr.length + ' research</span>'
+      + '<span class="research-section-count memory-count">' + arr.length + ' ' + t('research.count_label') + '</span>'
       + '<span class="research-section-right">'
       +   clearAllHtml
       +   '<span class="research-section-dot' + (dotPulse ? ' pulsing' : '') + '" style="background:' + dotColor + ';"></span>'
@@ -897,7 +898,7 @@ function _buildJobCard(job) {
 
   if (job.status === 'queued') {
     const rounds = job.settings?.max_rounds;
-    const roundsLabel = !rounds ? 'Auto rounds' : `${rounds} rounds`;
+    const roundsLabel = !rounds ? t('research.auto_rounds') : t('research.rounds_count', { n: rounds });
     const epName = job.settings?._endpointName || '';
     const mName = job.settings?._modelName || '';
     const meta = [mName, epName, roundsLabel].filter(Boolean).join(' -- ');
@@ -988,10 +989,10 @@ function _buildJobCard(job) {
     const failed = srcCount === 0;
     if (failed) card.classList.add('research-job-failed');
     const doneBadge = failed
-      ? `<span class="research-cat-badge research-cat-failed">${_cancelIcon} no results</span>`
-      : (job.category ? `<span class="research-cat-badge">${_esc(job.category)}</span>` : `<span class="research-cat-badge research-cat-standard">standard</span>`);
+      ? `<span class="research-cat-badge research-cat-failed">${_cancelIcon} ${t('research.no_results')}</span>`
+      : (job.category ? `<span class="research-cat-badge">${_esc(job.category)}</span>` : `<span class="research-cat-badge research-cat-standard">${t('research.standard')}</span>`);
     const failNote = failed
-      ? `<div class="research-job-failnote">Couldn't extract anything — try rephrasing the question, or switch the search engine in Settings.</div>`
+      ? `<div class="research-job-failnote">${t('research.fail_note')}</div>`
       : '';
     card.innerHTML = `
       <div class="research-job-header">
@@ -1032,7 +1033,7 @@ function _buildJobCard(job) {
     card.querySelector('[data-action="delete"]').addEventListener('click', async (e) => {
       e.stopPropagation();
       if (window.styledConfirm) {
-        const ok = await window.styledConfirm('Delete this research? This permanently removes it from disk.', { confirmText: 'Delete', danger: true });
+        const ok = await window.styledConfirm(t('research.delete_confirm'), { confirmText: t('common.delete'), danger: true });
         if (!ok) return;
       }
       try { await fetch(`${_apiBase}/api/research/${job.id}`, { method: 'DELETE', credentials: 'same-origin' }); } catch {}
@@ -1052,9 +1053,9 @@ function _buildJobCard(job) {
       </div>
       ${errMsg}
       <div class="research-job-actions">
-        <button class="research-job-action" data-action="retry" title="Retry">${_retryIcon} Retry</button>
-        <button class="research-job-action" data-action="edit" title="Edit and retry">${_editIcon} Edit</button>
-        <button class="research-job-action research-job-action-dim" data-action="dismiss" title="Dismiss">${_cancelIcon}</button>
+        <button class="research-job-action" data-action="retry" title="${t('research.retry_title')}">${_retryIcon} ${t('research.retry')}</button>
+        <button class="research-job-action" data-action="edit" title="${t('research.edit_retry_title')}">${_editIcon} ${t('research.edit')}</button>
+        <button class="research-job-action research-job-action-dim" data-action="dismiss" title="${t('research.dismiss_title')}">${_cancelIcon}</button>
       </div>
     `;
     card.querySelector('[data-action="retry"]').addEventListener('click', (e) => {
@@ -1088,7 +1089,7 @@ const _CAT_LABELS = {
 };
 
 function _renderResult(job) {
-  if (!job.result) return '<div class="research-job-loading">Loading result...</div>';
+  if (!job.result) return '<div class="research-job-loading">' + t('research.loading_result') + '</div>';
   const cat = job.category || '';
   const catIcon = _CAT_ICONS[cat] || '';
   const catLabel = _CAT_LABELS[cat] || '';
@@ -1117,7 +1118,7 @@ function _renderResult(job) {
         ? `<a href="${url}" target="_blank" rel="noopener" class="research-source-link">${title}</a>`
         : `<span class="research-source-link">${title}</span>`;
     }
-    if (job.sources.length > 10) html += `<span class="research-source-more">+${job.sources.length - 10} more</span>`;
+    if (job.sources.length > 10) html += `<span class="research-source-more">+${job.sources.length - 10} ${t('research.more')}</span>`;
     html += '</div>';
   }
 
@@ -1150,7 +1151,7 @@ async function _copyResult(job, btn) {
   if (job.findings?.length) {
     text += '\n\n---\n## Raw Findings\n';
     for (const f of job.findings) {
-      text += `\n### ${f.title || 'Untitled'}\nSource: ${f.url || ''}\n${f.summary || ''}\n`;
+      text += `\n### ${f.title || t('research.untitled')}\nSource: ${f.url || ''}\n${f.summary || ''}\n`;
     }
   }
   if (job.sources?.length) {
@@ -1197,7 +1198,7 @@ async function _copyResult(job, btn) {
       btn.classList.add('research-job-action-copied');
       setTimeout(() => { btn.innerHTML = orig; btn.classList.remove('research-job-action-copied'); }, 2000);
     } else {
-      btn.innerHTML = `${_cancelIcon} Failed`;
+      btn.innerHTML = `${_cancelIcon} ${t('research.failed')}`;
       setTimeout(() => { btn.innerHTML = orig; }, 2000);
     }
   }
@@ -1208,7 +1209,7 @@ async function _copyResult(job, btn) {
 async function _chatAboutResearch(researchId, btn) {
   if (!researchId) return;
   const origLabel = btn ? btn.innerHTML : '';
-  if (btn) { btn.disabled = true; btn.innerHTML = `${_chatIcon} Creating…`; }
+  if (btn) { btn.disabled = true; btn.innerHTML = `${_chatIcon} ${t('research.creating')}`; }
   try {
     const res = await fetch(`${_apiBase}/api/research/spinoff/${researchId}`, {
       method: 'POST', credentials: 'same-origin',
@@ -1233,7 +1234,7 @@ async function _chatAboutResearch(researchId, btn) {
     }
   } catch (e) {
     if (btn) { btn.disabled = false; btn.innerHTML = origLabel; }
-    alert('Could not start follow-up chat: ' + e.message);
+    alert(t('research.follow_up_failed', { msg: e.message }));
   }
 }
 

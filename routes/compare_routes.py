@@ -11,6 +11,7 @@ import logging
 
 from core.database import Comparison, SessionLocal
 from core.session_manager import SessionManager
+from core.translations import t
 from src.auth_helpers import get_current_user
 from routes.session_routes import _reject_raw_endpoint_url_for_non_admin
 
@@ -136,13 +137,13 @@ def setup_compare_routes(session_manager: SessionManager):
                         # An id the caller can't see (wrong owner / deleted) must
                         # NOT silently fall back to a same-URL row with a different
                         # key — that's exactly the mix-up ids exist to prevent.
-                        raise HTTPException(404, "Model endpoint not found")
+                        raise HTTPException(404, t("compare.endpoint_not_found"))
                     # The id already resolved the endpoint; ignore any raw URL the
                     # caller also sent and dial the stored config instead.
                     endpoint = ep.base_url
                 elif not endpoint:
                     raise HTTPException(
-                        422, "endpoint_a/endpoint_b or endpoint_a_id/endpoint_b_id is required"
+                        422, t("compare.endpoint_required")
                     )
                 else:
                     # Resolve the supplied URL to a ModelEndpoint the caller owns
@@ -246,13 +247,13 @@ def setup_compare_routes(session_manager: SessionManager):
         try:
             comp = db.query(Comparison).filter(Comparison.id == comp_id).first()
             if not comp:
-                raise HTTPException(404, "Comparison not found")
+                raise HTTPException(404, t("compare.not_found"))
             # SECURITY: strict ownership — null-owner Comparisons were
             # accessible to every user.
             if user and comp.owner != user:
-                raise HTTPException(404, "Comparison not found")
+                raise HTTPException(404, t("compare.not_found"))
             if comp.winner:
-                raise HTTPException(400, "Already voted")
+                raise HTTPException(400, t("compare.already_voted"))
 
             mapping = json.loads(comp.blind_mapping) if comp.blind_mapping else {"left": "a", "right": "b"}
 
@@ -263,7 +264,7 @@ def setup_compare_routes(session_manager: SessionManager):
             elif winner == "right":
                 comp.winner = mapping["right"]
             else:
-                raise HTTPException(400, "winner must be 'left', 'right', or 'tie'")
+                raise HTTPException(400, t("compare.invalid_winner"))
 
             comp.voted_at = datetime.utcnow()
             db.commit()
@@ -351,11 +352,11 @@ def setup_compare_routes(session_manager: SessionManager):
         try:
             comp = db.query(Comparison).filter(Comparison.id == comp_id).first()
             if not comp:
-                raise HTTPException(404, "Comparison not found")
+                raise HTTPException(404, t("compare.not_found"))
             # SECURITY: strict ownership — null-owner Comparisons were
             # accessible to every user.
             if user and comp.owner != user:
-                raise HTTPException(404, "Comparison not found")
+                raise HTTPException(404, t("compare.not_found"))
             db.delete(comp)
             db.commit()
             return {"status": "deleted"}

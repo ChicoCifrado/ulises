@@ -1,0 +1,24 @@
+{
+  "mcp": {
+    "auth_successful": "Autorización Exitosa",
+    "connecting": "El servidor MCP se está conectando. Puedes cerrar esta ventana y volver a Ulises.",
+    "error": "Error",
+    "no_auth_code": "No se encontró un código de autorización en la URL.",
+    "invalid_url": "Formato de URL inválido.",
+    "server_not_found": "Servidor no encontrado.",
+    "no_oauth_config": "No hay configuración OAuth.",
+    "auth_failed": "Autorización Fallida",
+    "google_error": "Google devolvió un error: {error}",
+    "connected": "{name} conectado con {count} herramientas. Puedes cerrar esta ventana.",
+    "connection_failed": "Autorizado pero la Conexión Falló",
+    "connection_failed_desc": "Tokens guardados, pero el servidor no pudo conectarse: {error}. Intenta reconectar desde Configuración.",
+    "authorize_google": "Autorizar Cuenta de Google",
+    "step1": "1. Haz clic en el botón de abajo para iniciar sesión con Google",
+    "step2": "2. Después de aprobar, tu navegador mostrará una página de error — eso es normal",
+    "step3": "3. Copia la URL completa de la barra de direcciones de tu navegador",
+    "step4": "4. Pégala abajo y haz clic en Conectar",
+    "paste_url": "Pega la URL de tu navegador después de iniciar sesión:",
+    "connect": "Conectar",
+    "sign_in_with_google": "Iniciar sesión con Google"
+  }
+}

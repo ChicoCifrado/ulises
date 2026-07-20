@@ -1,0 +1,36 @@
+{
+  "calendar": {
+    "reminder_title": "Recordatorio de calendario",
+    "reminder_set": "Recordatorio configurado para {{time}}",
+    "refreshed": "Calendario actualizado",
+    "moved": "Movido",
+    "saved_calendar": "\"{{name}}\" guardado",
+    "title_required": "El título es obligatorio",
+    "end_after_start": "La hora de fin debe ser posterior a la hora de inicio",
+    "save_failed": "Error al guardar",
+    "delete_failed": "Error al eliminar",
+    "errors": {
+      "not_found": "Calendario no encontrado",
+      "event_not_found": "Evento no encontrado",
+      "password_required": "La contraseña es obligatoria",
+      "account_not_found": "Cuenta no encontrada",
+      "auth_failed": "Autenticación fallida — verifica usuario/contraseña",
+      "forbidden": "Prohibido — el usuario no puede acceder a esa URL",
+      "not_found_url": "No encontrado — verifica la ruta de la URL",
+      "redirect_not_followed": "No se siguen redirecciones por seguridad de CalDAV; usa la URL final",
+      "connection_refused": "Conexión rechazada: {{error}}",
+      "connection_timed_out": "Tiempo de conexión agotado",
+      "failed_to_create": "Error al crear el evento",
+      "failed_to_update": "Error al actualizar el evento",
+      "failed_to_delete": "Error al eliminar el evento",
+      "ics_import_failed": "Error al importar ICS: {{error}}",
+      "ics_export_failed": "Error al exportar ICS",
+      "text_required": "El texto es obligatorio",
+      "no_llm": "No hay endpoint LLM configurado",
+      "llm_failed": "Error de LLM: {{error}}",
+      "could_not_extract_json": "No se pudo extraer el JSON",
+      "invalid_json": "JSON inválido: {{error}}",
+      "no_start_time": "El modelo no generó una hora de inicio"
+    }
+  }
+}

@@ -12,7 +12,8 @@
 // derived from pointer velocity (slower → thicker), which gives signatures
 // their characteristic ink-bleed feel.
 
-const API_BASE = window.location.origin;
+import { API_BASE } from './apiBase.js';
+import { t } from './i18n.js';
 
 function _esc(s) {
   return String(s ?? '')
@@ -382,24 +383,24 @@ export function capture(opts = {}) {
     const overlay = _modal(`
       <div class="modal-content" style="width:min(560px,94vw);">
         <div class="modal-header">
-          <h4>Draw your signature</h4>
-          <button class="sig-close modal-close" title="Close">×</button>
+          <h4>${t('signature.draw_title')}</h4>
+          <button class="sig-close modal-close" title="${t('common.close')}">×</button>
         </div>
         <div class="modal-body">
           <canvas class="sig-canvas" width="900" height="280" data-no-swipe-dismiss></canvas>
           <div style="margin-top:10px;display:flex;align-items:center;gap:10px;font-size:0.78rem;">
-            <label for="sig-smoothness" style="white-space:nowrap;opacity:0.8;">Smoothness</label>
+            <label for="sig-smoothness" style="white-space:nowrap;opacity:0.8;">${t('signature.smoothness')}</label>
             <input id="sig-smoothness" class="sig-smoothness" type="range" min="0" max="10" step="1" value="${initialSmooth}" style="flex:1;">
             <span class="sig-smoothness-val" style="width:18px;text-align:right;font-variant-numeric:tabular-nums;opacity:0.7;">${initialSmooth}</span>
           </div>
-          <input class="sig-name" type="text" placeholder="Name (optional, e.g. 'Full' or 'Initials')" style="margin-top:10px;">
+          <input class="sig-name" type="text" placeholder="${t('signature.name_placeholder')}" style="margin-top:10px;">
         </div>
         <div class="modal-footer" style="display:flex;gap:8px;justify-content:flex-end;padding-top:8px;border-top:1px solid var(--border);margin-top:6px;">
-          <button class="sig-clear confirm-btn confirm-btn-secondary">Clear</button>
-          <button class="sig-undo confirm-btn confirm-btn-secondary">Undo</button>
+          <button class="sig-clear confirm-btn confirm-btn-secondary">${t('common.clear')}</button>
+          <button class="sig-undo confirm-btn confirm-btn-secondary">${t('common.undo')}</button>
           <span style="flex:1;"></span>
-          <button class="sig-cancel confirm-btn confirm-btn-secondary">Cancel</button>
-          <button class="sig-save confirm-btn confirm-btn-primary" disabled>Save</button>
+          <button class="sig-cancel confirm-btn confirm-btn-secondary">${t('common.cancel')}</button>
+          <button class="sig-save confirm-btn confirm-btn-primary" disabled>${t('common.save')}</button>
         </div>
       </div>
     `);
@@ -437,7 +438,7 @@ export function capture(opts = {}) {
           dataUrl: trimmed.dataUrl,
           width: trimmed.width,
           height: trimmed.height,
-          name: (nameInput.value || '').trim() || 'Signature',
+          name: (nameInput.value || '').trim() || t('signature.default_name'),
         });
         const out = {
           id: sig.id,
@@ -449,7 +450,7 @@ export function capture(opts = {}) {
         setLastUsed(out);
         close(out);
       } catch (e) {
-        alert('Failed to save signature: ' + e.message);
+        alert(t('signature.save_failed', { msg: e.message }));
         saveBtn.disabled = false;
       }
     };
@@ -475,12 +476,12 @@ export function pick(opts = {}) {
     const overlay = _modal(`
       <div class="modal-content" style="width:min(560px,94vw);">
         <div class="modal-header">
-          <h4>Choose a signature</h4>
-          <button class="sig-close modal-close" title="Close">×</button>
+          <h4>${t('signature.choose_title')}</h4>
+          <button class="sig-close modal-close" title="${t('common.close')}">×</button>
         </div>
         <div class="modal-body">
-          <button class="sig-new-tile confirm-btn confirm-btn-primary" style="width:100%;margin-bottom:12px;padding:8px;">+ Draw new signature</button>
-          ${tiles ? `<div style="display:grid;grid-template-columns:repeat(3, 1fr);gap:10px;">${tiles}</div>` : '<div style="opacity:0.6;font-size:0.8rem;text-align:center;padding:8px 0;">No saved signatures yet — draw one above.</div>'}
+          <button class="sig-new-tile confirm-btn confirm-btn-primary" style="width:100%;margin-bottom:12px;padding:8px;">+ ${t('signature.draw_new')}</button>
+          ${tiles ? `<div style="display:grid;grid-template-columns:repeat(3, 1fr);gap:10px;">${tiles}</div>` : `<div style="opacity:0.6;font-size:0.8rem;text-align:center;padding:8px 0;">${t('signature.no_saved')}</div>`}
         </div>
       </div>
     `);
@@ -507,7 +508,7 @@ export function pick(opts = {}) {
       btn.addEventListener('click', async (e) => {
         e.stopPropagation();
         const id = btn.dataset.id;
-        if (!await window.styledConfirm('Delete this signature?', { confirmText: 'Delete', danger: true })) return;
+        if (!await window.styledConfirm(t('signature.delete_confirm'), { confirmText: t('common.delete'), danger: true })) return;
         await _deleteSignature(id);
         btn.closest('.sig-tile')?.remove();
       });

@@ -1,0 +1,14 @@
+{
+  "rename_session": {
+    "aria_label": "Renombrar sesión",
+    "title": "Renombrar sesión",
+    "close_aria": "Cerrar modal de renombrar sesión",
+    "label": "Nombre de la sesión",
+    "placeholder": "Ingresa el nombre de la sesión",
+    "cancel": "Cancelar",
+    "save": "Guardar",
+    "errors": {
+      "failed": "Error al renombrar la sesión"
+    }
+  }
+}

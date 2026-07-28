@@ -3518,7 +3518,7 @@ function startUlisesApp() {
   // Set CSS variables
   document.documentElement.style.setProperty('--line-height', '20px');
   // Initialize i18n (lazy — does not block other init)
-  i18nInit().catch(e => console.warn('[i18n] Init failed, using English:', e));
+  const i18nPromise = i18nInit().catch(e => console.warn('[i18n] Init failed, using English:', e));
   initRailHoverLabels();
 
   // Smooth keyboard open/close on mobile — keep chat scrolled to bottom
@@ -4142,7 +4142,8 @@ function startUlisesApp() {
   }
 
   // Non-critical: load in parallel, resolve silently
-  modelsModule.refreshModels(false).then(() => {
+  // Wait for i18n init so t() resolves in the correct language
+  const _renderWelcome = () => {
     try { sessionModule.updateModelPicker(); } catch (_) {}
     const modelsBox = document.getElementById('models');
     const hasModels = modelsBox && modelsBox.querySelector('.models-row');
@@ -4150,7 +4151,8 @@ function startUlisesApp() {
       const tip = document.getElementById('welcome-tip');
       if (tip) tip.textContent = t('models.setup_tip_no_models');
     }
-  }).catch(() => {});
+  };
+  i18nPromise.then(() => modelsModule.refreshModels(false).then(_renderWelcome).catch(() => {}));
   modelsModule.refreshProviders();
   ragModule.loadPersonalDocs();
   memoryModule.loadMemories(); // Ensure memories are loaded on page load

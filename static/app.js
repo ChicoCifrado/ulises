@@ -4152,7 +4152,12 @@ function startUlisesApp() {
       if (tip) tip.textContent = t('models.setup_tip_no_models');
     }
   };
-  i18nPromise.then(() => modelsModule.refreshModels(false).then(_renderWelcome).catch(() => {}));
+  i18nPromise.then(() => {
+    modelsModule.refreshModels(false).then(_renderWelcome).catch(() => {});
+    window.addEventListener('languagechange', () => {
+      modelsModule.refreshModels(false).then(_renderWelcome).catch(() => {});
+    });
+  });
   modelsModule.refreshProviders();
   ragModule.loadPersonalDocs();
   memoryModule.loadMemories(); // Ensure memories are loaded on page load

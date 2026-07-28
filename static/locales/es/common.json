@@ -65,7 +65,21 @@
       "generic": "Algo salió mal",
       "timeout": "La solicitud tardó demasiado",
       "network": "Error de red",
-      "offline": "Parece que no tienes conexión"
+      "offline": "Parece que no tienes conexión",
+      "load_sessions": "Error al cargar sesiones: {{error}}",
+      "load_session": "Error al cargar sesión: {{error}}",
+      "backend_unreachable": "Error al conectar con el servidor: {{error}}",
+      "session_create": "Error al crear sesión ({{status}}): {{detail}}",
+      "open_archived": "Error al abrir sesión archivada",
+      "send": "Error al enviar: {{error}}",
+      "edit_failed": "Error al editar: {{error}}",
+      "resend": "Error al reenviar: {{error}}",
+      "regenerate": "Error al regenerar: {{error}}",
+      "fork": "Error al bifurcar: {{error}}",
+      "delete": "Error al eliminar: {{error}}",
+      "rewrite": "Error al reescribir: {{error}}",
+      "save_failed_with_error": "Error al guardar: {{error}}",
+      "import_failed": "Error al importar: {{error}}"
     }
   }
 }

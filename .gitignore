@@ -72,6 +72,9 @@ output.txt.txt
 !docs/**/*.jpg
 !docs/**/*.gif
 !docs/**/*.webp
+# Brand/logo assets in static/img/ are committed.
+!static/img/*.png
+!static/img/**/*.png
 
 # Reports and temp files
 reports/

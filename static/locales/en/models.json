@@ -20,6 +20,7 @@
     "ask_admin": "Ask your admin to add a model endpoint",
     "setup_get_started": "Set up a model endpoint to get started",
     "setup_tip": "Go to Admin &rarr; Model Endpoints to connect a provider",
+    "setup_tip_no_models": "Add an AI endpoint from Settings in the sidebar, or paste an endpoint/API key into the chat.",
     "yours_for_voyage": "Your models are ready for the voyage",
     "tip_long_press": "Long-press a model for quick actions",
     "tip_nobody_mode": "Enable Nobody mode in settings for uninterrupted chat",

@@ -2837,6 +2837,11 @@ function initLanguageSettings() {
   if (!sel || sel.dataset.bound === '1') return;
   sel.dataset.bound = '1';
 
+  const current = getCurrentLang();
+  if (sel.querySelector(`option[value="${current}"]`)) {
+    sel.value = current;
+  }
+
   fetch('/api/prefs/app_language', { credentials: 'same-origin' })
     .then(r => r.json())
     .then(data => {

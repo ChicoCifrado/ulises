@@ -19,7 +19,7 @@
     "no_models_user": "No hay endpoints de modelo disponibles",
     "ask_admin": "Pide a tu administrador que añada un endpoint de modelo",
     "setup_get_started": "Configura un endpoint de modelo para empezar",
-    "setup_tip": "Ve a Admin &rarr; Model Endpoints para conectar un proveedor",
+    "setup_tip": "Ve a Admin → Endpoints de modelo para conectar un proveedor",
     "setup_tip_no_models": "Añade un endpoint de IA desde Ajustes en la barra lateral, o pega un endpoint/API key en el chat.",
     "yours_for_voyage": "Tus modelos están listos para el viaje",
     "tip_long_press": "Mantén pulsado un modelo para acciones rápidas",

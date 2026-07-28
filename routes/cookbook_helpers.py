@@ -1333,7 +1333,7 @@ def _diagnose_serve_output(text: str) -> dict | None:
         r"Application startup complete|GET /v1/|Uvicorn running on", tail, re.I
     ):
         return {
-            "message":             t("cookbook.diagnosis.traceback_detected"),
+            "message":             t("cookbook.traceback_detected"),
             "suggestions": [{"label": "inspect traceback and retry with adjusted backend/settings", "op": "manual"}],
         }
     return None

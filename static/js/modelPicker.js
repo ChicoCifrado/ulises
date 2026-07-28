@@ -79,6 +79,15 @@ let _deps = null;
 let _autoSelectingDefault = false;
 let _defaultChatPickInFlight = false;
 
+function _firstAvailableModel() {
+  if (!window.modelsModule || !window.modelsModule.getCachedItems) return null;
+  const items = window.modelsModule.getCachedItems() || [];
+  const first = items.find(item => !item.offline && ((item.models || []).length || (item.models_extra || []).length));
+  if (!first) return null;
+  const models = (first.models || []).concat(first.models_extra || []);
+  return { url: first.url, modelId: models[0], endpointId: first.endpoint_id };
+}
+
 function _modelExists(modelId, url) {
   if (!modelId || !window.modelsModule || !window.modelsModule.getCachedItems) return false;
   const items = window.modelsModule.getCachedItems() || [];

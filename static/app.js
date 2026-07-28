@@ -3,7 +3,7 @@
 // ES6 module — entry point, no exports (wires all modules together)
 // ============================================
 import Storage from './js/storage.js';
-import { init as i18nInit, setLanguage as i18nSetLanguage, getCurrentLang as i18nGetLang } from './js/i18n.js';
+import { init as i18nInit, setLanguage as i18nSetLanguage, getCurrentLang as i18nGetLang, t } from './js/i18n.js';
 import uiModule from './js/ui.js';
 import workspaceModule from './js/workspace.js';
 import fileHandlerModule from './js/fileHandler.js';
@@ -3518,7 +3518,7 @@ function startUlisesApp() {
   // Set CSS variables
   document.documentElement.style.setProperty('--line-height', '20px');
   // Initialize i18n (lazy — does not block other init)
-  i18nInit().catch(e => console.warn('[i18n] Init failed, using English:', e));
+  const i18nPromise = i18nInit().catch(e => console.warn('[i18n] Init failed, using English:', e));
   initRailHoverLabels();
 
   // Smooth keyboard open/close on mobile — keep chat scrolled to bottom
@@ -4142,15 +4142,22 @@ function startUlisesApp() {
   }
 
   // Non-critical: load in parallel, resolve silently
-  modelsModule.refreshModels(false).then(() => {
+  // Wait for i18n init so t() resolves in the correct language
+  const _renderWelcome = () => {
     try { sessionModule.updateModelPicker(); } catch (_) {}
     const modelsBox = document.getElementById('models');
     const hasModels = modelsBox && modelsBox.querySelector('.models-row');
     if (!hasModels) {
       const tip = document.getElementById('welcome-tip');
-      if (tip) tip.textContent = 'Add an AI endpoint from Settings in the sidebar, or paste an endpoint/API key into the chat.';
+      if (tip) tip.textContent = t('models.setup_tip_no_models');
     }
-  }).catch(() => {});
+  };
+  i18nPromise.then(() => {
+    modelsModule.refreshModels(false).then(_renderWelcome).catch(() => {});
+    window.addEventListener('languagechange', () => {
+      modelsModule.refreshModels(false).then(_renderWelcome).catch(() => {});
+    });
+  });
   modelsModule.refreshProviders();
   ragModule.loadPersonalDocs();
   memoryModule.loadMemories(); // Ensure memories are loaded on page load

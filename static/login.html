@@ -76,6 +76,8 @@
     s.setProperty('--bg-effect-size', String(effSize));
     // Stash so the deferred module knows which canvas effect to start.
     window.__loginBgPattern = pattern;
+    // i18n readiness promise — block setMode until locale data is loaded
+    window.__onI18nReady = new Promise(function(r){ window.__resolveI18nReady = r; });
     // Apply the body class as soon as <body> exists so static-gradient
     // patterns (dots, synapse) paint immediately on first frame.
     var apply = function() { document.body.classList.add('bg-pattern-' + pattern); };
@@ -287,12 +289,12 @@
       </div>
     </div>
 
-    <button type="submit" id="submitBtn" data-i18n="auth.sign_in">Sign In</button>
+    <button type="submit" id="submitBtn">Sign In</button>
   </form>
 
   <div class="toggle" id="toggleArea" style="display:none">
-    <span id="toggleText" data-i18n="auth.dont_have_account">Don't have an account? </span>
-    <a id="toggleLink" data-i18n="auth.sign_up" href="#">Sign up</a>
+    <span id="toggleText">Don't have an account? </span>
+    <a id="toggleLink" href="#">Sign up</a>
   </div>
 </main>
 
@@ -374,16 +376,14 @@
       return;
     }
     signupAllowed = !!data.signup_enabled;
-    if (!data.configured) {
-      setMode('setup');
-    } else {
-      setMode('login');
-    }
+    await window.__onI18nReady;
+    setMode(data.configured ? 'login' : 'setup');
     const policyRes = await policyPromise;
     if (policyRes && policyRes.ok) {
       policy = await policyRes.json();
     }
   } catch (e) {
+    await window.__onI18nReady;
     setMode('login');
   }
 
@@ -604,7 +604,7 @@ import { init, t, setLanguage, reapply } from '/static/js/i18n.js';
 window._t = t;
 window._i18nSetLanguage = setLanguage;
 window._i18nReapply = reapply;
-init();
+init().then(function(){ window.__resolveI18nReady(); });
 </script>
 </body>
 </html>

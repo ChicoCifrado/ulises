@@ -2837,18 +2837,30 @@ function initLanguageSettings() {
   if (!sel || sel.dataset.bound === '1') return;
   sel.dataset.bound = '1';
 
-  const current = getCurrentLang();
-  if (sel.querySelector(`option[value="${current}"]`)) {
-    sel.value = current;
-  }
-
-  fetch('/api/prefs/app_language', { credentials: 'same-origin' })
-    .then(r => r.json())
-    .then(data => {
-      if (data.value) {
-        sel.value = data.value;
-        setLanguage(data.value).catch(() => {});
+  fetch('/api/i18n/languages', { credentials: 'same-origin' })
+    .then(r => r.ok ? r.json() : [])
+    .then(langs => {
+      if (!Array.isArray(langs) || !langs.length) return;
+      sel.innerHTML = '';
+      langs.forEach(lang => {
+        const opt = document.createElement('option');
+        opt.value = lang.code;
+        opt.textContent = lang.native;
+        sel.appendChild(opt);
+      });
+      const current = getCurrentLang();
+      if (sel.querySelector(`option[value="${current}"]`)) {
+        sel.value = current;
       }
+      fetch('/api/prefs/app_language', { credentials: 'same-origin' })
+        .then(r => r.json())
+        .then(data => {
+          if (data.value && sel.querySelector(`option[value="${data.value}"]`)) {
+            sel.value = data.value;
+            setLanguage(data.value).catch(() => {});
+          }
+        })
+        .catch(() => {});
     })
     .catch(() => {});
 
